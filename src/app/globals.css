@@ -1,0 +1,150 @@
+@import "tailwindcss";
+@config "../../tailwind.config.js";
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 2rem;
+}
+
+@layer base {
+  :root {
+    --background: #ffffff;
+    --foreground: #000000;
+    --card: #ffffff;
+    --card-foreground: #000000;
+    --muted: #f8f8f8;
+    --muted-foreground: #666666;
+    --accent: #000000;
+    --accent-foreground: #ffffff;
+    --border: #eeeeee;
+    --ring: #000000;
+  }
+
+  .dark {
+    --background: #000000;
+    --foreground: #ffffff;
+    --card: #0a0a0a;
+    --card-foreground: #ffffff;
+    --muted: #111111;
+    --muted-foreground: #888888;
+    --accent: #ffffff;
+    --accent-foreground: #000000;
+    --border: #222222;
+    --ring: #ffffff;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-none;
+  }
+
+  body {
+    @apply bg-background text-foreground transition-colors duration-300 antialiased;
+    font-family: var(--font-sans);
+  }
+}
+
+/* ─── Global Helpers ─────────────────────── */
+.container-minimal {
+  @apply mx-auto max-w-6xl px-6;
+}
+
+/* ─── Animations ─────────────────────────── */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+/* ─── Custom Scrollbar ───────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+
+/* ─── Editor Font Styles ─────────────────── */
+.font-serif { font-family: 'Merriweather', serif; }
+.font-inter { font-family: 'Inter', sans-serif; }
+.font-monospace { font-family: 'Fira Code', monospace; }
+.font-clean { font-family: 'Outfit', sans-serif; }
+
+.prose pre {
+  @apply bg-foreground/5 p-4 rounded-xl border border-border/50 text-foreground;
+}
+
+.prose blockquote {
+  @apply border-l-4 border-foreground/20 pl-4 italic text-muted-foreground;
+}
+
+.prose mark {
+  @apply rounded px-1;
+}.header-contrast {
+  @apply font-bold tracking-tight;
+  font-family: 'Inter', sans-serif;
+}
+
+.header-contrast span {
+  @apply opacity-20 transition-opacity hover:opacity-40;
+}
+
+.card-minimal {
+  @apply bg-card border border-border rounded-[2rem] p-8 shadow-sm transition-all duration-500 hover:border-foreground/20 hover:shadow-2xl hover:-translate-y-1;
+}
+
+.text-subtle {
+  @apply text-muted-foreground font-bold uppercase tracking-widest text-[10px] opacity-60;
+}
+
+.bg-grid-subtle {
+  background-image: radial-gradient(var(--border) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+h1, h2, h3, h4 {
+  font-family: 'Inter', sans-serif;
+  @apply font-bold tracking-tight;
+}
+
+.btn-primary {
+  @apply bg-foreground text-background font-medium text-sm px-6 py-3 rounded-xl transition-all hover:bg-foreground/90 active:scale-[0.98] shadow-sm;
+}
+
+.btn-secondary {
+  @apply bg-muted text-foreground font-medium text-sm px-6 py-3 rounded-xl transition-all hover:bg-muted/80 active:scale-[0.98];
+}
