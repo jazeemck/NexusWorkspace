@@ -9,8 +9,20 @@ import { cn } from "@/lib/utils";
 import toast from "react-hot-toast";
 import { migrateGuestData } from "@/lib/auth-client";
 
-export default function Navbar() {
+interface NavbarProps {
+  user?: {
+    id: string;
+    email: string;
+    name?: string;
+    image?: string;
+  } | null;
+}
+
+export default function Navbar({ user = null }: NavbarProps) {
   const { data: session } = useSession();
+  
+  // Prefer passed user prop, fallback to session user
+  const activeUser = user || session?.user;
   const router = useRouter();
   const pathname = usePathname();
   const [showDropdown, setShowDropdown] = useState(false);
@@ -41,7 +53,7 @@ export default function Navbar() {
 
         <div className="flex items-center gap-8">
           {/* Main Navigation Links - Only show when logged in */}
-          {session && (
+          {activeUser && (
             <div className="hidden md:flex items-center gap-8">
               <Link 
                 href="/dashboard" 
@@ -64,7 +76,7 @@ export default function Navbar() {
             </div>
           )}
 
-          {!session ? (
+          {!activeUser ? (
             <div className="flex items-center gap-6">
               <Link 
                 href="/auth/signin"
@@ -85,19 +97,19 @@ export default function Navbar() {
                 onClick={() => setShowDropdown(!showDropdown)}
                 className="flex items-center gap-3 px-3 py-1.5 rounded-xl border border-border bg-muted/20 hover:bg-muted/40 transition-all group"
               >
-                {session.user?.image ? (
+                {activeUser.image ? (
                   <img
-                    src={session.user.image}
+                    src={activeUser.image}
                     alt="avatar"
                     className="w-5 h-5 rounded-full border border-border"
                   />
                 ) : (
                   <div className="w-5 h-5 rounded-full bg-foreground text-background flex items-center justify-center text-[10px] font-black group-hover:rotate-12 transition-transform">
-                    {session.user?.name?.charAt(0).toUpperCase() || 'U'}
+                    {activeUser.name?.charAt(0).toUpperCase() || activeUser.email?.charAt(0).toUpperCase() || 'U'}
                   </div>
                 )}
                 <span className="hidden sm:block text-xs font-medium text-foreground">
-                  {session.user?.name?.split(" ")[0]}
+                  {activeUser.name?.split(" ")[0] || activeUser.email?.split("@")[0]}
                 </span>
                 <ChevronDown className={cn("w-3 h-3 text-muted-foreground transition-transform duration-300", showDropdown && "rotate-180")} />
               </button>
@@ -110,7 +122,7 @@ export default function Navbar() {
                   />
                   <div className="absolute right-0 mt-3 w-60 bg-card border border-border rounded-2xl shadow-2xl p-2 animate-in zoom-in-95 slide-in-from-top-2 duration-300">
                     <div className="px-4 py-3 border-b border-border/50 mb-2">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-foreground truncate">{session.user?.name}</p>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-foreground truncate">{activeUser.name || activeUser.email}</p>
                     </div>
                     
                     <Link 

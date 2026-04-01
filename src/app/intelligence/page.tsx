@@ -9,7 +9,7 @@ export default async function IntelligencePage() {
   // const supabase = await createClient();
   // const { data: { user } } = await supabase.auth.getUser();
   // if (!user) redirect("/");
-  const user = { id: 'mock-user', email: 'user@example.com' };
+  const user = { id: 'mock-user', email: 'user@example.com', name: undefined, image: undefined };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
