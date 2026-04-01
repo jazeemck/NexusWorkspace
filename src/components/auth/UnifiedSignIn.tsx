@@ -4,7 +4,7 @@ import { signIn } from "next-auth/react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { eye, eyeOff, Chrome, LogIn, Key, Mail, EyeOff, Eye } from "lucide-react";
+import { Chrome, LogIn, Key, Mail, EyeOff, Eye } from "lucide-react";
 import toast from "react-hot-toast";
 
 export default function UnifiedSignIn() {
