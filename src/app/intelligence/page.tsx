@@ -1,16 +1,19 @@
 import Navbar from "@/components/layout/Navbar";
 import { BarChart, Brain, Zap, Target } from "lucide-react";
 
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
+
 export const metadata = { title: "Intelligence — Nexus" };
 
 export default async function IntelligencePage() {
-
-  const user = {
-    id: 'mock-user',
-    email: 'user@example.com',
-    name: undefined,
-    image: undefined
-  };
+  const session = await getServerSession(authOptions);
+  const user = session?.user ? {
+    id: session.user.id,
+    email: session.user.email || "",
+    name: session.user.name || undefined,
+    image: session.user.image || undefined
+  } : undefined;
 
   return (
     <div className="min-h-screen bg-background text-foreground">

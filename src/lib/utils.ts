@@ -37,5 +37,5 @@ export function getThumbnailUrl(videoId: string): string {
 }
 
 export function isValidYouTubeUrl(url: string): boolean {
-  return /^(https?:\/\/)?(www\.)?(youtube\.com\/.*[?&]v=|youtu\.be\/|youtube\.com\/(shorts|live)\/)([\w-]{11})/.test(url);
+  return /^(https?:\/\/)?(www\.)?(youtube\.com\/.*[?&]v=|youtu\.be\/|youtube\.com\/(shorts|live)\/)([\w-]{11})/i.test(url);
 }

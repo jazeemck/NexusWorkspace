@@ -15,32 +15,50 @@ export async function GET(req: NextRequest) {
     .order("updated_at", { ascending: false });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data);
+
+  // Map database field names to frontend expected names
+  const normalizedData = data.map((n: any) => ({
+    ...n,
+    pinned: n.pinned ?? n.is_pinned ?? false,
+    favorite: n.favorite ?? n.is_favorite ?? false,
+    folder: n.folder ?? n.folder_id ?? "General",
+    createdAt: n.createdAt || n.created_at,
+    updatedAt: n.updatedAt || n.updated_at
+  }));
+
+  return NextResponse.json(normalizedData);
 }
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { title, content, tags, folder, favorite, pinned } = await req.json();
+  const { title, content, tags, folder, favorite, pinned, body } = await req.json();
   const supabase = await createClient();
   
+  // Map fields to what we found in the database: is_pinned, is_favorite, folder_id
+  const insertData = {
+    user_id: session.user.id,
+    title,
+    content,
+    // Add columns matching the existing database schema to ensure sync works now
+    folder_id: folder || "General",
+    is_pinned: pinned || false,
+    is_favorite: favorite || false,
+    last_edited_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
   const { data, error } = await supabase
     .from("notes")
-    .insert({
-      user_id: session.user.id,
-      title,
-      content,
-      tags: tags || [],
-      folder: folder || "General",
-      favorite: favorite || false,
-      pinned: pinned || false,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
+    .insert(insertData)
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("Notes API Error:", error);
+    return NextResponse.json({ error: error.message, detail: error.details }, { status: 500 });
+  }
   return NextResponse.json(data);
 }

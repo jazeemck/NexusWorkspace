@@ -109,13 +109,12 @@ export async function POST(req: NextRequest) {
     }
 
     // 5. Execute Gemini Analysis with Model Fallback
-    // Including newest models based on models_list.json
     const models = [
-      "gemini-2.5-flash",
       "gemini-2.0-flash", 
-      "gemini-2.0-flash-lite",
-      "gemini-1.5-flash", 
-      "gemini-3.1-flash-lite-preview"
+      "gemini-1.5-flash",
+      "gemini-1.5-flash-8b",
+      "gemini-2.0-flash-lite-preview-02-05",
+      "gemini-1.5-pro",
     ];
     
     let lastError: any;

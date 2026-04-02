@@ -228,6 +228,40 @@
       "topK": 64
     },
     {
+      "name": "models/gemma-4-26b-a4b-it",
+      "version": "001",
+      "displayName": "Gemma 4 26B A4B IT",
+      "description": "Gemma 4 26B A4B IT",
+      "inputTokenLimit": 262144,
+      "outputTokenLimit": 32768,
+      "supportedGenerationMethods": [
+        "generateContent",
+        "countTokens"
+      ],
+      "temperature": 1,
+      "topP": 0.95,
+      "topK": 64,
+      "maxTemperature": 2,
+      "thinking": true
+    },
+    {
+      "name": "models/gemma-4-31b-it",
+      "version": "001",
+      "displayName": "Gemma 4 31B IT",
+      "description": "Gemma 4 31B IT",
+      "inputTokenLimit": 262144,
+      "outputTokenLimit": 32768,
+      "supportedGenerationMethods": [
+        "generateContent",
+        "countTokens"
+      ],
+      "temperature": 1,
+      "topP": 0.95,
+      "topK": 64,
+      "maxTemperature": 2,
+      "thinking": true
+    },
+    {
       "name": "models/gemini-flash-latest",
       "version": "Gemini Flash Latest",
       "displayName": "Gemini Flash Latest",
@@ -319,25 +353,6 @@
       "topP": 0.95,
       "topK": 64,
       "maxTemperature": 1
-    },
-    {
-      "name": "models/gemini-2.5-flash-lite-preview-09-2025",
-      "version": "2.5-preview-09-25",
-      "displayName": "Gemini 2.5 Flash-Lite Preview Sep 2025",
-      "description": "Preview release (Septempber 25th, 2025) of Gemini 2.5 Flash-Lite",
-      "inputTokenLimit": 1048576,
-      "outputTokenLimit": 65536,
-      "supportedGenerationMethods": [
-        "generateContent",
-        "countTokens",
-        "createCachedContent",
-        "batchGenerateContent"
-      ],
-      "temperature": 1,
-      "topP": 0.95,
-      "topK": 64,
-      "maxTemperature": 2,
-      "thinking": true
     },
     {
       "name": "models/gemini-3-pro-preview",
@@ -695,6 +710,17 @@
       "version": "3.1",
       "displayName": "Veo 3.1 fast",
       "description": "Veo 3.1 fast",
+      "inputTokenLimit": 480,
+      "outputTokenLimit": 8192,
+      "supportedGenerationMethods": [
+        "predictLongRunning"
+      ]
+    },
+    {
+      "name": "models/veo-3.1-lite-generate-preview",
+      "version": "3.1",
+      "displayName": "Veo 3.1 lite",
+      "description": "Veo 3.1 lite",
       "inputTokenLimit": 480,
       "outputTokenLimit": 8192,
       "supportedGenerationMethods": [

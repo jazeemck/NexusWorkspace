@@ -122,13 +122,24 @@ export default function JobSearchClient({ user }: { user: { id: string; email?: 
       
       let skills: string[] = [];
       try {
-        const cleaned = typeof data.result === "string" ? JSON.parse(data.result.replace(/```json\s*|```/g, "").trim()) : data.result;
-        skills = cleaned || [];
-      } catch (e) { console.error(e); }
+        const raw = data.result;
+        let parsed;
+        if (typeof raw === "string") {
+          const cleanJson = raw.replace(/```json\s*|```/g, "").trim();
+          parsed = JSON.parse(cleanJson);
+        } else {
+          parsed = raw;
+        }
+        skills = Array.isArray(parsed) ? parsed : (parsed.skills || []);
+      } catch (e) { 
+        console.error("JSON Parse Error during skill extraction:", e);
+        toast.error("Format mismatch in intelligence response.");
+      }
 
       if (Array.isArray(skills) && skills.length > 0) {
         setExtractedSkills(skills);
-        setSearchTerm(skills.slice(0, 3).join(", "));
+        const searchTerms = skills.slice(0, 3).join(", ");
+        setSearchTerm(searchTerms);
         setShowAnalysis(true);
         toast.success(`Interpreted ${skills.length} skills!`);
       } else {

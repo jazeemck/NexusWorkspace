@@ -83,8 +83,8 @@ function formatDuration(seconds: number): string {
 }
 
 async function analyzeWithGemini(content: string, videoTitle: string, targetLanguage: string, category: string, durationSeconds: number | null): Promise<GeminiResult> {
-  // Use Gemini 2.5/2.0 models as they have higher availability and performance in this region
-  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
+  // Use Gemini 1.5 versions which are current and stable
+  const models = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro", "gemini-2.0-flash-exp"];
   const durationText = durationSeconds ? formatDuration(durationSeconds) : "Unknown";
   let lastError: any;
 
@@ -98,7 +98,7 @@ async function analyzeWithGemini(content: string, videoTitle: string, targetLang
         systemInstruction: systemPrompt,
         generationConfig: { 
           responseMimeType: "application/json",
-          temperature: 0.1 // Lower temperature for more stable JSON output
+          temperature: 0.1 
         }
       });
 
@@ -137,7 +137,6 @@ Return ONLY the raw JSON object. No markdown formatting, no preamble.`;
         console.log(`[AI] Intelligence synthesis complete via ${modelName}`);
         return parsed;
       } catch {
-        // Fallback: strip markdown blocks if present
         text = text.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
         const parsed = JSON.parse(text) as GeminiResult;
         console.log(`[AI] Intelligence synthesis complete via ${modelName} (after cleanup)`);
@@ -146,22 +145,26 @@ Return ONLY the raw JSON object. No markdown formatting, no preamble.`;
     } catch (err: any) {
       lastError = err;
       console.error(`[AI] ${modelName} Node Failure:`, err.message || err);
-      // If it's a model not found error, we definitely want to continue to pro model
-      if (err.message?.includes("404") || err.message?.includes("not found")) {
+      
+      const msg = err.message?.toLowerCase() || "";
+      if (msg.includes("leaked") || msg.includes("reported as leaked")) {
+        throw new Error("CRITICAL: Your Gemini API key has been reported as leaked and disabled by Google. Please update your environment variables with a fresh API key from Google AI Studio.");
+      }
+      
+      if (msg.includes("404") || msg.includes("not found")) {
         continue;
       }
-      // If it's a safety block, we might as well stop if it's the same content
-      if (err.message?.includes("safety") || err.message?.includes("finish_reason")) {
+      
+      if (msg.includes("safety") || msg.includes("finish_reason")) {
         throw new Error("Content blocked by AI safety filters. Please try a different video.");
       }
       continue;
     }
   }
 
-  // If we reach here, refine the final error message for the frontend
   const finalMsg = lastError?.message || "All intelligence nodes failed to respond.";
   if (finalMsg.includes("404") && finalMsg.includes("gemini")) {
-    throw new Error("Target Gemini model version is currently unavailable in your region or API version. Ensure your API key has access to gemini-1.5-flash.");
+    throw new Error("Specified Gemini model is unavailable. Ensure your API key is correct and has access to Gemini 1.5 Flash.");
   }
   
   throw lastError;
@@ -171,8 +174,6 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     const userId = session?.user?.id;
-    
-    // Guest mode is allowed - do not block!
     const supabase = await createClient();
 
     const body = await req.json();
@@ -186,40 +187,67 @@ export async function POST(req: NextRequest) {
     const thumbnailUrl = videoId ? getThumbnailUrl(videoId) : null;
 
     let transcriptText = "";
+    let extractionMethod = "transcript";
+    
     try {
       if (videoId) {
         console.log(`[Transcript] Fetching for videoId: ${videoId}`);
-        const transcript = await YoutubeTranscript.fetchTranscript(videoId);
-        transcriptText = transcript.map(t => t.text).join(' ');
+        let transcript;
+        try {
+          // Attempt 1: Default fetch
+          transcript = await YoutubeTranscript.fetchTranscript(videoId);
+        } catch (initialErr) {
+          console.warn("[Transcript] Initial fetch failed, trying progressive language fallback...");
+          const langs = ['en', 'hi', 'es', 'fr', 'de', 'ja'];
+          for (const lang of langs) {
+            try {
+              transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang });
+              if (transcript) break;
+            } catch (e) {}
+          }
+        }
+        
+        if (transcript && transcript.length > 0) {
+          transcriptText = transcript.map(t => t.text).join(' ');
+        }
       }
-    } catch (transcriptErr) {
-      console.error("Transcript fetch error:", transcriptErr);
-      return NextResponse.json(
-        { error: "This video has no available captions. Try a different video." },
-        { status: 400 }
-      );
+    } catch (transcriptErr: any) {
+      console.warn("Transcript extraction failed, falling back to metadata synthesis:", transcriptErr.message);
     }
 
-    if (!transcriptText) {
-      return NextResponse.json(
-        { error: "This video has no available captions. Try a different video." },
-        { status: 400 }
-      );
-    }
-
-    // ── Step 1: Firecrawl scrape (Only for Title) ───────────────────────────
+    // ── Step 1: Firecrawl scrape (Title & Metadata Fallback) ────────────────
     let videoTitle = "YouTube Video";
+    let videoDescription = "";
     try {
       const scrapeResult = await scrapeWithFirecrawl(url);
       const metaTitle = scrapeResult.metadata?.ogTitle ?? scrapeResult.metadata?.title;
       if (metaTitle) videoTitle = metaTitle;
       
       if (scrapeResult.success && scrapeResult.markdown) {
+        videoDescription = scrapeResult.markdown;
         const titleMatch = scrapeResult.markdown.match(/^#\s+(.+)/m);
         if (titleMatch) videoTitle = titleMatch[1].trim();
+        
+        // If transcript failed, use the markdown (description/metadata) as the source
+        if (!transcriptText) {
+          console.log("[Extraction] No transcript found. Using metadata/description as fallback.");
+          transcriptText = videoDescription;
+          extractionMethod = "metadata_analysis";
+        }
       }
     } catch (firecrawlErr) {
-      console.error("Firecrawl error (title fetch only):", firecrawlErr);
+      console.error("Firecrawl error:", firecrawlErr);
+    }
+
+    if (!transcriptText || transcriptText.trim().length < 50) {
+      console.warn("[Summarize] Exhausted all extraction engines. Transcript and metadata unavailable.");
+      return NextResponse.json(
+        { 
+          error: "This video has no available captions or descriptive metadata. Our engine could not extract enough intelligence to generate a report. Try a public video with captions.",
+          code: "EXTRACTION_FAILED"
+        },
+        { status: 400 }
+      );
     }
 
     // ── Step 3: Fetch Duration ───────────────────────────────────────────
@@ -228,7 +256,7 @@ export async function POST(req: NextRequest) {
     // ── Step 4: Gemini analysis ────────────────────────────────────────────
     let geminiResult: GeminiResult;
     try {
-      console.log(`[Summarize] Starting analysis for videoId: ${videoId}`);
+      console.log(`[Summarize] Starting ${extractionMethod} for videoId: ${videoId}`);
       geminiResult = await analyzeWithGemini(transcriptText, videoTitle, targetLanguage, category, durationSeconds);
     } catch (aiErr: any) {
       console.error("[Summarize] Gemini Analysis Critical Failure:", aiErr);

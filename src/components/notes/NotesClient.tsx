@@ -148,7 +148,10 @@ export default function NotesClient({ initialUser }: { initialUser: any }) {
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify(newNote),
                     });
-                    if (!res.ok) throw new Error("Failed to save note");
+                    if (!res.ok) {
+                        const errorData = await res.json().catch(() => ({}));
+                        throw new Error(errorData.error || "Failed to save note");
+                    }
                     const savedRaw = await res.json();
                     const saved = {
                         ...savedRaw,
@@ -156,17 +159,21 @@ export default function NotesClient({ initialUser }: { initialUser: any }) {
                         updatedAt: savedRaw.updatedAt || savedRaw.updated_at
                     };
                     setData(prev => ({ ...prev, notes: [saved, ...prev.notes] }));
-                } catch (e) {
-                    toast.error("Failed to sync note to cloud.");
+                    
+                    // CRITICAL: Use the ID from the database, not the client-generated one
+                    setIsCreating(false);
+                    setSelectedNoteId(saved.id);
+                    if (isManual) toast.success("Note created!");
+                } catch (e: any) {
+                    const errMsg = e.message || "Failed to sync note to cloud.";
+                    toast.error(errMsg);
                 }
             } else {
                 setData(prev => ({ ...prev, notes: [newNote, ...prev.notes] }));
+                setIsCreating(false);
+                setSelectedNoteId(newNoteId);
+                if (isManual) toast.success("Note created!");
             }
-            
-            setIsCreating(false);
-            setSelectedNoteId(newNoteId);
-            if (isManual) toast.success("Note created!");
-            
         } else if (currentId) {
             const updatedNote = { ...noteData, updatedAt: now };
             

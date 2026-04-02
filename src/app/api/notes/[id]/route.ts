@@ -7,7 +7,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { title, content, tags, folder, favorite, pinned } = await req.json();
+  const { title, content, folder, favorite, pinned } = await req.json();
   const supabase = await createClient();
   const { id } = await params;
 
@@ -16,10 +16,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     .update({
       title,
       content,
-      tags: tags || [],
-      folder: folder || "General",
-      favorite: favorite || false,
-      pinned: pinned || false,
+      // No tags column in db, so we omit it for now to prevent crashes
+      folder_id: folder || "General",
+      is_favorite: favorite || false,
+      is_pinned: pinned || false,
+      last_edited_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
