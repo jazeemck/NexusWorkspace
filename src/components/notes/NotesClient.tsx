@@ -184,7 +184,10 @@ export default function NotesClient({ initialUser }: { initialUser: any }) {
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify(updatedNote),
                     });
-                    if (!res.ok) throw new Error("Failed to update note");
+                    if (!res.ok) {
+                        const errorData = await res.json().catch(() => ({}));
+                        throw new Error(errorData.error || "Failed to update note");
+                    }
                     const savedRaw = await res.json();
                     const saved = {
                         ...savedRaw,
@@ -195,8 +198,9 @@ export default function NotesClient({ initialUser }: { initialUser: any }) {
                         ...prev,
                         notes: prev.notes.map(n => n.id === currentId ? saved : n)
                     }));
-                } catch (e) {
-                    toast.error("Failed to sync changes.");
+                } catch (e: any) {
+                    const errMsg = e.message || "Failed to sync changes.";
+                    toast.error(errMsg);
                 }
             } else {
                 setData(prev => ({

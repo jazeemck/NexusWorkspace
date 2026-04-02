@@ -187,6 +187,8 @@ export async function POST(req: NextRequest) {
     const thumbnailUrl = videoId ? getThumbnailUrl(videoId) : null;
 
     let transcriptText = "";
+    let videoTitle = "YouTube Video";
+    let videoDescription = "";
     let extractionMethod = "transcript";
     
     try {
@@ -209,15 +211,20 @@ export async function POST(req: NextRequest) {
         
         if (transcript && transcript.length > 0) {
           transcriptText = transcript.map(t => t.text).join(' ');
+        } else {
+          // Attempt 3: Try with the full URL instead of just ID
+          try {
+            transcript = await YoutubeTranscript.fetchTranscript(url);
+            if (transcript && transcript.length > 0) {
+              transcriptText = transcript.map(t => t.text).join(' ');
+            }
+          } catch (e2) {}
         }
       }
     } catch (transcriptErr: any) {
       console.warn("Transcript extraction failed, falling back to metadata synthesis:", transcriptErr.message);
     }
 
-    // ── Step 1: Firecrawl scrape (Title & Metadata Fallback) ────────────────
-    let videoTitle = "YouTube Video";
-    let videoDescription = "";
     try {
       const scrapeResult = await scrapeWithFirecrawl(url);
       const metaTitle = scrapeResult.metadata?.ogTitle ?? scrapeResult.metadata?.title;
@@ -228,15 +235,42 @@ export async function POST(req: NextRequest) {
         const titleMatch = scrapeResult.markdown.match(/^#\s+(.+)/m);
         if (titleMatch) videoTitle = titleMatch[1].trim();
         
-        // If transcript failed, use the markdown (description/metadata) as the source
-        if (!transcriptText) {
-          console.log("[Extraction] No transcript found. Using metadata/description as fallback.");
-          transcriptText = videoDescription;
+        // Combine results if transcript is sparse
+        if (!transcriptText || transcriptText.length < 200) {
+          console.log("[Extraction] No/Sparse transcript found. Using metadata/description as primary source.");
+          transcriptText = (transcriptText ? transcriptText + "\n\n" : "") + videoDescription;
           extractionMethod = "metadata_analysis";
         }
       }
     } catch (firecrawlErr) {
       console.error("Firecrawl error:", firecrawlErr);
+    }
+
+    // ── Step 2: Manual Metadata Extraction (Final Fallback) ────────────────
+    if (!transcriptText || transcriptText.trim().length < 200) {
+      try {
+        console.log("[Extraction] Both transcript and Firecrawl provided sparse results. Attempting manual HTML scrape...");
+        const metaRes = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' } });
+        const html = await metaRes.text();
+        
+        // Extract title if missing
+        if (videoTitle === "YouTube Video" || videoTitle === "") {
+            const titleMatch = html.match(/<title>(.+)<\/title>/i);
+            if (titleMatch) videoTitle = titleMatch[1].replace(" - YouTube", "").trim();
+        }
+
+        // Extract description
+        const descMatch = html.match(/"shortDescription":"(.+?)","isCrawlable"/);
+        if (descMatch) {
+            let desc = descMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"');
+            if (desc.length > 50) {
+                transcriptText = (transcriptText && transcriptText.length > 50 ? transcriptText + "\n\n[Additional Metadata]:\n" : "[Metadata Description]:\n") + desc;
+                extractionMethod = extractionMethod === "transcript" ? "transcript_and_meta" : "manual_meta_analysis";
+            }
+        }
+      } catch (e) {
+        console.error("Manual scrape failed:", e);
+      }
     }
 
     if (!transcriptText || transcriptText.trim().length < 50) {
