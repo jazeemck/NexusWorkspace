@@ -119,7 +119,7 @@ Return ONLY raw JSON.`;
   for (const mId of models) {
     try {
       console.log(`[Summarize] Stabilizing Node: ${mId}`);
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/${mId}:generateContent?key=${apiKey}`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${mId}:generateContent?key=${apiKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

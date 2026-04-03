@@ -61,18 +61,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing GEMINI_API_KEY in Production." }, { status: 500 });
     }
 
-    const models = ["gemini-1.5-flash-latest", "gemini-1.5-pro-latest"];
+    const models = ["gemini-1.5-flash", "gemini-1.5-pro"];
     let finalResult = "";
     let lastErr: any;
 
     for (const mId of models) {
       try {
-        console.log(`[JobSearch] Stabilization Tunnel firing: ${mId}`);
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/${mId}:generateContent?key=${apiKey}`, {
+        console.log(`[JobSearch] stabilization Tunnel firing: ${mId}`);
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${mId}:generateContent?key=${apiKey}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            contents: [{ parts: aiParts }],
+            contents: [{ parts: aiParts }]
           })
         });
 
