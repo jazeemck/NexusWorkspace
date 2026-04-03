@@ -78,10 +78,7 @@ export default function UrlForm() {
           video_title: data.video_title || "YouTube Intelligence Report",
           thumbnail_url: data.thumbnail_url || "",
           tldr: data.intelligentSummary || data.tldr || "", // Map from API response
-          key_takeaways: (data.timelineSummary || []).map((item: any) => ({
-             timestamp: item.timestamp,
-             summary: `${item.title}: ${item.description}`
-          })),
+          key_takeaways: data.key_takeaways || [],
           createdAt: new Date().toISOString()
         };
         

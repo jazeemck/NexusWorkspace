@@ -102,19 +102,21 @@ async function analyzeWithGemini(
   let lastError: any;
 
   const assignment = `
-Generate a high-fidelity intelligence report in ${targetLanguage}:
-1. "intelligentSummary": A 3-5 paragraph deep-dive into the core thesis and expert insights.
-2. "timelineSummary": A chronological mapping (8-12 segments) with timestamps, titles, and descriptions.
+  Generate a high-density intelligence report in ${targetLanguage}.
+  
+  MANDATORY REQUIREMENTS:
+  1. "intelligentSummary": A 3-5 paragraph deep-dive into the core thesis.
+  2. "timelineSummary": A chronological mapping of EXACTLY 10 segments with specific timestamps (e.g. "00:00", "05:12").
 
-SCHEMA:
-{
-  "intelligentSummary": "string",
-  "timelineSummary": [
-    { "timestamp": "string", "title": "string", "description": "string" }
-  ]
-}
+  SCHEMA:
+  {
+    "intelligentSummary": "string",
+    "timelineSummary": [
+      { "timestamp": "string", "title": "string", "description": "string" }
+    ]
+  }
 
-Return ONLY raw JSON.`;
+  Return ONLY raw JSON with zero markdown formatting.`;
 
   for (const mId of models) {
     try {
@@ -135,10 +137,17 @@ Return ONLY raw JSON.`;
         const data = await res.json();
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
         if (text) {
-             // Robust JSON extraction in case AI adds markdown brackets
              let sanitized = text.trim();
+             // Robust JSON extraction
+             const jsonMatch = sanitized.match(/\[\s*\{[\s\S]*\}\s*\]|\{\s*"[\s\S]*":[\s\S]*\}/);
+             if (jsonMatch) {
+                sanitized = jsonMatch[0];
+             }
+             
+             // Removal of common AI markdown artifacts
              if (sanitized.startsWith("```json")) sanitized = sanitized.replace(/^```json\n|```$/g, "");
              else if (sanitized.startsWith("```")) sanitized = sanitized.replace(/^```\n|```$/g, "");
+             
              return JSON.parse(sanitized);
         }
       } else {
