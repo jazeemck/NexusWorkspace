@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
@@ -39,9 +39,21 @@ export async function POST(req: NextRequest) {
       }
 
       // ── Phase 2: Dynamic Intelligence Discovery ───────────────────────────────────
-      const potentialModels = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp", "gemini-2.0-flash"];
+      const potentialModels = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"];
       let finalResult = "";
       let lastErr: any;
+
+      // ── Phase 1: Deep Discovery Radar ──────────────────────────────────────────
+      try {
+        const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+        const listData = await listRes.json();
+        const available = listData.models ? listData.models.map((m: any) => m.name.split("/").pop()) : [];
+        console.log(`[JobSearch] Deep Discovery Found: ${available.join(", ")}`);
+        // Record the radar results to a local file for diagnostic sync
+        require('fs').writeFileSync('.radar_report.txt', JSON.stringify(available, null, 2));
+      } catch (e) {
+        console.warn("[JobSearch] Radar scan failed.");
+      }
 
       for (const modelId of potentialModels) {
         if (finalResult) break;
