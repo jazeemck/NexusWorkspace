@@ -36,11 +36,18 @@ async function scrapeWithFirecrawl(url: string): Promise<FirecrawlResponse> {
       Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ url, formats: ["markdown"] }),
+    body: JSON.stringify({ 
+      url, 
+      formats: ["markdown"],
+      onlyMainContent: false, // Ensure we get the full description/chapters
+      waitFor: 3000 // Give YouTube time to load dynamic metadata
+    }),
   });
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Firecrawl HTTP ${res.status}: ${err}`);
+    // Log the error for production debugging but don't crash
+    console.error(`[Extraction] Firecrawl Failure: HTTP ${res.status}: ${err}`);
+    return { success: false, error: err };
   }
   return res.json() as Promise<FirecrawlResponse>;
 }
@@ -178,6 +185,15 @@ export async function POST(req: NextRequest) {
     const userId = session?.user?.id;
     const supabase = await createClient();
 
+    // ── Step 0: Health Check ──────────────────────────────────────────────
+    if (!process.env.FIRECRAWL_API_KEY || !process.env.GEMINI_API_KEY) {
+        console.error("[HealthCheck] Missing critical API Keys in Environment Variables.");
+        return NextResponse.json({ 
+            error: "Production environment is misconfigured. Ensure FIRECRAWL_API_KEY and GEMINI_API_KEY are set in your Vercel/Production settings.",
+            code: "CONFIG_ERROR"
+        }, { status: 500 });
+    }
+
     const body = await req.json();
     const { url, targetLanguage = "English", category = "Lectures & Tutorials" } = body;
 
@@ -196,110 +212,92 @@ export async function POST(req: NextRequest) {
     let videoTitle = "YouTube Video";
     let videoDescription = "";
     let extractionMethod = "transcript";
-    let chapters = "";
+
+    // ── Step 1: Parallel Extraction Strategy ─────────────────────────────────────
+    console.log(`[Extraction] Launching Multi-Layer Intelligence Fetch for: ${videoId}`);
     
-    try {
-      if (videoId) {
-        console.log(`[Transcript] Fetching for videoId: ${videoId}`);
-        let transcript;
+    const [transcriptResult, firecrawlResult] = await Promise.allSettled([
+      (async () => {
+        let text = "";
         try {
-          // Attempt 1: Default fetch
-          transcript = await YoutubeTranscript.fetchTranscript(videoId);
-        } catch (initialErr) {
-          console.warn("[Transcript] Initial fetch failed, trying progressive language fallback...");
-          const langs = ['en', 'hi', 'es', 'fr', 'de', 'ja'];
-          for (const lang of langs) {
-            try {
-              transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang });
-              if (transcript) break;
-            } catch (e) {}
+          let t = await YoutubeTranscript.fetchTranscript(videoId);
+          if (!t || t.length === 0) {
+            console.warn("[Extraction] Initial fetch empty, trying URL fetch...");
+            t = await YoutubeTranscript.fetchTranscript(url);
           }
-        }
-        
-        if (transcript && transcript.length > 0) {
-          transcriptText = transcript.map(t => t.text).join(' ');
-        } else {
-          // Attempt 3: Try with the full URL instead of just ID
-          try {
-            transcript = await YoutubeTranscript.fetchTranscript(url);
-            if (transcript && transcript.length > 0) {
-              transcriptText = transcript.map(t => t.text).join(' ');
-            }
-          } catch (e2) {}
-        }
-      }
-    } catch (transcriptErr: any) {
-      console.warn("Transcript extraction failed, falling back to metadata synthesis:", transcriptErr.message);
+          if (t && t.length > 0) text = t.map(item => item.text).join(' ');
+        } catch (e) {}
+        return text;
+      })(),
+      scrapeWithFirecrawl(url)
+    ]);
+
+    // Handle Transcript Layer
+    if (transcriptResult.status === "fulfilled" && transcriptResult.value) {
+      transcriptText = transcriptResult.value;
+      console.log(`[Extraction] Transcript Layer: SUCCESS (${transcriptText.length} chars)`);
     }
 
-    try {
-      const scrapeResult = await scrapeWithFirecrawl(url);
-      const metaTitle = scrapeResult.metadata?.ogTitle ?? scrapeResult.metadata?.title;
+    // Handle Metadata/Firecrawl Layer
+    if (firecrawlResult.status === "fulfilled" && firecrawlResult.value && firecrawlResult.value.success) {
+      const res = firecrawlResult.value;
+      const metaTitle = res.metadata?.ogTitle ?? res.metadata?.title;
       if (metaTitle) videoTitle = metaTitle;
       
-      if (scrapeResult.success && scrapeResult.markdown) {
-        videoDescription = scrapeResult.markdown;
-        const titleMatch = scrapeResult.markdown.match(/^#\s+(.+)/m);
+      if (res.markdown) {
+        videoDescription = res.markdown;
+        const titleMatch = res.markdown.match(/^#\s+(.+)/m);
         if (titleMatch) videoTitle = titleMatch[1].trim();
         
-        // Combine results if transcript is sparse
+        // Use as primary if transcript is sparse
         if (!transcriptText || transcriptText.length < 200) {
-          console.log("[Extraction] No/Sparse transcript found. Using metadata/description as primary source.");
           transcriptText = (transcriptText ? transcriptText + "\n\n" : "") + videoDescription;
-          extractionMethod = "metadata_analysis";
+          extractionMethod = transcriptText ? "metadata_analysis" : "transcript";
+          console.log(`[Extraction] High-Performance Meta Layer: SUCCESS (${videoDescription.length} chars)`);
         }
       }
-    } catch (firecrawlErr) {
-      console.error("Firecrawl error:", firecrawlErr);
     }
 
-    // ── Step 2: Manual Metadata Extraction (Final Fallback) ────────────────
+    // ── Step 2: Stealth Manual Scrape (Final Bypass Fallback) ──────────────
     if (!transcriptText || transcriptText.trim().length < 200) {
       try {
-        console.log("[Extraction] Both transcript and Firecrawl provided sparse results. Attempting manual HTML scrape...");
-        const metaRes = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' } });
+        console.log("[Extraction] Both parallel layers provided sparse results. Attempting Stealth Manual Scrape...");
+        const metaRes = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' }, cache: 'no-store' });
         const html = await metaRes.text();
         
-        // Extract title if missing
-        if (videoTitle === "YouTube Video" || videoTitle === "") {
-            const titleMatch = html.match(/<title>(.+)<\/title>/i);
-            if (titleMatch) videoTitle = titleMatch[1].replace(" - YouTube", "").trim();
-        }
-
-        // Check for 'Unavailable' OR 'Deleted' OR 'Private'
+        // Unavailable Detection
         if (html.includes("Video unavailable") || html.includes("This video isn't available anymore") || html.includes("Private video")) {
-          return NextResponse.json(
-            { error: "This video is private, deleted, or otherwise unavailable on YouTube. Our intelligence engine cannot process non-existent content." },
-            { status: 404 }
-          );
+          return NextResponse.json({ error: "Video is private, restricted, or deleted." }, { status: 404 });
         }
 
-        // Extract description
-        const descMatch = html.match(/"shortDescription":"(.+?)","isCrawlable"/);
-        if (descMatch) {
-            let desc = descMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"');
+        // Title and Description Extract
+        if (videoTitle === "YouTube Video" || videoTitle === "") {
+            const tm = html.match(/<title>(.+)<\/title>/i);
+            if (tm) videoTitle = tm[1].replace(" - YouTube", "").trim();
+        }
+
+        const dm = html.match(/"shortDescription":"(.+?)","isCrawlable"/);
+        if (dm) {
+            let desc = dm[1].replace(/\\n/g, "\n").replace(/\\"/g, '"');
             if (desc.length > 50) {
                 transcriptText = (transcriptText && transcriptText.length > 50 ? transcriptText + "\n\n[Additional Metadata]:\n" : "[Metadata Description]:\n") + desc;
-                extractionMethod = extractionMethod === "transcript" ? "transcript_and_meta" : "manual_meta_analysis";
+                extractionMethod = extractionMethod === "transcript" ? "context_synthesis" : "stealth_manual_analysis";
+                console.log(`[Extraction] Stealth Manual Layer: SUCCESS (${desc.length} chars)`);
             }
         }
 
-        // Extract Chapters (High-Signal Data)
-        const chapterMatches = html.match(/"title":\{"simpleText":"(.+?)"\},"timeDescriptionUTF8":"(.+?)"/g);
-        if (chapterMatches && chapterMatches.length > 0) {
-            const parsedChapters = chapterMatches.map(c => {
-                const titleMatch = c.match(/"title":\{"simpleText":"(.+?)"\}/);
-                const timeMatch = c.match(/"timeDescriptionUTF8":"(.+?)"/);
-                return titleMatch && timeMatch ? `${timeMatch[1]} - ${titleMatch[1]}` : null;
+        // Chapters Extract
+        const cm = html.match(/"title":\{"simpleText":"(.+?)"\},"timeDescriptionUTF8":"(.+?)"/g);
+        if (cm && cm.length > 0) {
+            const parsed = cm.map(c => {
+                const t = c.match(/"title":\{"simpleText":"(.+?)"\}/);
+                const tm = c.match(/"timeDescriptionUTF8":"(.+?)"/);
+                return t && tm ? `${tm[1]} - ${t[1]}` : null;
             }).filter(Boolean).join("\n");
-            
-            if (parsedChapters) {
-                transcriptText = (transcriptText ? transcriptText + "\n\n[VIDEO CHAPTERS]:\n" : "[VIDEO CHAPTERS]:\n") + parsedChapters;
-                console.log(`[Extraction] Extracted ${chapterMatches.length} video chapters.`);
-            }
+            if (parsed) transcriptText = (transcriptText ? transcriptText + "\n\n[PROCESSED CHAPTERS]:\n" : "[PROCESSED CHAPTERS]:\n") + parsed;
         }
       } catch (e) {
-        console.error("Manual scrape failed:", e);
+        console.error("[Extraction] Stealth Manual Layer: FAILED", e);
       }
     }
 
@@ -312,7 +310,8 @@ export async function POST(req: NextRequest) {
           diagnostics: {
              hasTranscript: !!transcriptText,
              hasFirecrawl: !!videoDescription,
-             videoId
+             videoId,
+             method: extractionMethod
           }
         },
         { status: 429 }
@@ -332,45 +331,22 @@ export async function POST(req: NextRequest) {
       
       const errorMessage = aiErr.message || String(aiErr);
       
-      // Specifically handle Quota/Rate Limit/429 errors
-      if (
-        errorMessage.includes("429") || 
-        errorMessage.toLowerCase().includes("quota") || 
-        errorMessage.toLowerCase().includes("rate limit")
-      ) {
-        return NextResponse.json(
-          { 
-            error: "Gemini API Quota Exceeded. Please try again in 60 seconds. Free tier users are limited to 15 requests per minute.",
+      if (errorMessage.includes("429") || errorMessage.toLowerCase().includes("quota")) {
+        return NextResponse.json({ 
+            error: "Gemini API Quota Exceeded. Please try again in 60 seconds.",
             code: "QUOTA_EXCEEDED"
-          },
-          { status: 429 }
-        );
+        }, { status: 429 });
       }
 
-      // Handle safety blocks
-      if (errorMessage.toLowerCase().includes("safety") || errorMessage.toLowerCase().includes("finish_reason") || errorMessage.toLowerCase().includes("blocked")) {
-        return NextResponse.json(
-          { error: "Content was flagged and blocked by AI safety protocols. This usually happens with restricted or sensitive video content." },
-          { status: 400 }
-        );
+      if (errorMessage.toLowerCase().includes("safety") || errorMessage.toLowerCase().includes("blocked")) {
+        return NextResponse.json({ error: "Content flagged by AI safety protocols." }, { status: 400 });
       }
 
-      // Handle model not found (the user's reported error)
-      if (errorMessage.toLowerCase().includes("not found") || errorMessage.toLowerCase().includes("404")) {
-        return NextResponse.json(
-          { error: "Target AI model not found. We are automatically shifting to a stable failover. Please retry your request." },
-          { status: 502 }
-        );
-      }
-
-      return NextResponse.json(
-        { error: `Intelligence synthesis failed: ${errorMessage.length > 100 ? errorMessage.substring(0, 100) + "..." : errorMessage}` },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: `Intelligence synthesis failed: ${errorMessage.substring(0, 50)}...` }, { status: 500 });
     }
 
     // ── Step 5: Save to Supabase ───────────────────────────────────────────
-    console.log(`[Summarize] Analysis complete. Saving to Supabase for user: ${userId || 'guest'}`);
+    console.log(`[Summarize] Saving to database for user: ${userId || 'guest'}`);
     const { data: summary, error: dbError } = await supabase
       .from("summaries")
       .insert({
@@ -383,21 +359,18 @@ export async function POST(req: NextRequest) {
           timestamp: item.timestamp,
           summary: `${item.title}: ${item.description}`
         })),
-        sentiment: "", // We can leave this empty or put a snippet
+        sentiment: "",
         sentiment_score: 0,
-        action_items: [], // New prompt doesn't ask for action items
+        action_items: [],
         raw_content: transcriptText.slice(0, 5000),
-        content_source: "transcript",
+        content_source: extractionMethod,
       })
       .select("id, video_title, thumbnail_url, tldr, key_takeaways")
       .single();
 
     if (dbError) {
       console.error("[Summarize] DB Insertion Error Details:", JSON.stringify(dbError, null, 2));
-      return NextResponse.json(
-        { error: `Database error: ${dbError.message}. Code: ${dbError.code}` },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: `Database failure: ${dbError.message}` }, { status: 500 });
     }
 
     return NextResponse.json({ 
@@ -409,9 +382,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error("Summarize API error:", err);
-    return NextResponse.json(
-      { error: "Unexpected server error." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Unexpected server error." }, { status: 500 });
   }
 }
