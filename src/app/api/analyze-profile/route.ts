@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing GEMINI_API_KEY in Production." }, { status: 500 });
     }
 
-    const models = ["gemini-1.5-flash", "gemini-1.5-pro"];
+    const models = ["gemini-1.5-flash-latest", "gemini-1.5-pro-latest"];
     let finalResult = "";
     let lastErr: any;
 
