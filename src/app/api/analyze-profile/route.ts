@@ -18,11 +18,8 @@ export async function POST(req: NextRequest) {
     const content = formData.get("content") as string | null;
     const action = formData.get("action") as string || "extract-skills";
 
-    let profileText = content || "";
-
     if (file) {
-      // ── Step 1: Multimodal Extraction Fallback ────────────────────────────────
-      // We pass the raw bytes directly to Gemini to allow visual analysis if text extraction fails.
+      // ── Step 1: Multimodal Extraction ──────────────────────────────────────────
       const buffer = await file.arrayBuffer();
       const base64 = Buffer.from(buffer).toString("base64");
       
@@ -38,28 +35,17 @@ export async function POST(req: NextRequest) {
         aiParts.push({ text: `Assignment: Write a world-class, high-density cover letter for ${role}. Tailor it intensely based on this resume. Follow the tone of a high-performance executive. Return ONLY raw JSON in this format: { \"coverLetter\": \"string\" }.` });
       }
 
-      // ── Phase 2: Dynamic Intelligence Discovery ───────────────────────────────────
-      const potentialModels = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"];
+      // ── Phase 2: Elite Intelligence Discovery (Synchronized with Radar) ──────────
+      // Based on Radar Tape: your elite account uses 'gemini-2.5-flash' and 'gemini-2.0-flash'.
+      const potentialModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
       let finalResult = "";
       let lastErr: any;
-
-      // ── Phase 1: Deep Discovery Radar ──────────────────────────────────────────
-      try {
-        const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-        const listData = await listRes.json();
-        const available = listData.models ? listData.models.map((m: any) => m.name.split("/").pop()) : [];
-        console.log(`[JobSearch] Deep Discovery Found: ${available.join(", ")}`);
-        // Record the radar results to a local file for diagnostic sync
-        require('fs').writeFileSync('.radar_report.txt', JSON.stringify(available, null, 2));
-      } catch (e) {
-        console.warn("[JobSearch] Radar scan failed.");
-      }
 
       for (const modelId of potentialModels) {
         if (finalResult) break;
         
         try {
-          console.log(`[JobSearch] Intelligence Discovery: Probing ${modelId} at v1beta`);
+          console.log(`[JobSearch] Intelligence Discovery: Probing Elite Node ${modelId} at v1beta`);
           const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -73,12 +59,12 @@ export async function POST(req: NextRequest) {
             const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
             if (text) {
               finalResult = text;
-              console.log(`[JobSearch] Target Locked: Successfully used ${modelId}`);
+              console.log(`[JobSearch] Elite Target Locked: Successfully used ${modelId}`);
               break;
             }
           } else {
             lastErr = await res.text();
-            console.warn(`[JobSearch] Node ${modelId} unreachable: ${lastErr.substring(0, 50)}...`);
+            console.warn(`[JobSearch] Elite Node ${modelId} unreachable: ${lastErr.substring(0, 50)}...`);
           }
         } catch (e) {
           lastErr = e;
@@ -87,13 +73,12 @@ export async function POST(req: NextRequest) {
       }
 
       if (!finalResult) {
-         return NextResponse.json({ error: "System nodes are temporarily offline. Check your Gemini API billing/quota.", details: lastErr }, { status: 502 });
+         return NextResponse.json({ error: "System nodes are temporarily offline. Your future-gen account quota may be restricted.", details: lastErr }, { status: 502 });
       }
 
       return NextResponse.json({ result: finalResult });
     }
 
-    // ── Simple Text Flow (If no file provided) ───────────────────────────────────
     return NextResponse.json({ error: "Resume upload is currently required for precision matching." }, { status: 400 });
 
   } catch (error: any) {
