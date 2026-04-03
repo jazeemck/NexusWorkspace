@@ -127,11 +127,7 @@ Return ONLY raw JSON.`;
             parts: [{ 
               text: `TITLE: ${videoTitle}\nDURATION: ${durationText}\nCATEGORY: ${category}\n\nTRANSCRIPT:\n${content}\n\n${assignment}` 
             }] 
-          }],
-          generationConfig: { 
-            response_mime_type: "application/json",
-            temperature: 0.1
-          }
+          }]
         })
       });
 

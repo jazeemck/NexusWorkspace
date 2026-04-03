@@ -73,9 +73,6 @@ export async function POST(req: NextRequest) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ parts: aiParts }],
-            generationConfig: { 
-              response_mime_type: "application/json" 
-            }
           })
         });
 
