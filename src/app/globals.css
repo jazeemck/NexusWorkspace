@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@config "../../tailwind.config.js";
 
 @theme {
   --color-background: var(--background);
@@ -17,6 +16,8 @@
   --radius-xl: 1rem;
   --radius-2xl: 1.5rem;
   --radius-3xl: 2rem;
+  
+  --animate-fade-in: fadeIn 0.5s ease-out forwards;
 }
 
 @layer base {
