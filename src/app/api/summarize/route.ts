@@ -303,14 +303,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!transcriptText || transcriptText.trim().length < 50) {
-      console.warn("[Summarize] Exhausted all extraction engines. Transcript and metadata unavailable.");
+    if (!transcriptText || transcriptText.trim().length < 20) {
+      console.warn("[Summarize] CRITICAL EXTRACTION FAILURE: All layers failed.");
       return NextResponse.json(
         { 
-          error: "This video has no available captions or descriptive metadata. Our engine could not extract enough intelligence to generate a report. Try a public video with captions.",
-          code: "EXTRACTION_FAILED"
+          error: "Our extraction engine was temporarily throttled by YouTube. Please try another video or retry in 30 seconds as we rotate our access fingerprints.",
+          code: "EXTRACTION_BLOCKED",
+          diagnostics: {
+             hasTranscript: !!transcriptText,
+             hasFirecrawl: !!videoDescription,
+             videoId
+          }
         },
-        { status: 400 }
+        { status: 429 }
       );
     }
 
