@@ -12,151 +12,93 @@ export async function POST(req: NextRequest) {
     const action = (formData.get("action") as string) || "extract-skills";
     const targetRole = (formData.get("targetRole") as string) || "";
 
-    // 1. Validation: Ensure we have something to analyze
     if (!file && !content) {
-      return NextResponse.json(
-        { error: "No file or profile content provided" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Empty profile payload." }, { status: 400 });
     }
 
-    // 3. Prepare Prompt based on action
+    // ── Pre-Extraction ──────────────────────────────────────────────
     let promptText = "Analyze this resume/profile and provide professional structured insights.";
-    
     if (action === "extract-skills") {
-      promptText = `
-        You are an expert technical recruiter and AI resume parser. 
-        Analyze the provided content and extract a JSON array of all relevant tech and soft skills.
-        Be thorough - extract specific technologies, methodologies, and professional domains.
-        Return ONLY a pure JSON array of strings: ["React", "AI Engineering", "Product Strategy", ...]
-      `;
+      promptText = `You are an expert recruiter. Extract a JSON array of all tech and soft skills. Return ONLY: ["React", "AI", ...]`;
     } else if (action === "gap-analysis") {
-      promptText = `
-        Compare the user's profile against the requirements for a ${targetRole}.
-        Identify missing key skills and overlapping strengths.
-        Return a JSON object with: { "gaps": [], "matched": [], "confidence": 0, "recommendations": [] }
-      `;
+      promptText = `Compare profile to ${targetRole}. Identify missing skills. Return JSON: { "gaps": [], "matched": [], "confidence": 0, "recommendations": [] }`;
     } else if (action === "generate-cover-letter") {
-      promptText = `
-        You are a highly skilled career coach. 
-        Write a persuasive, sophisticated, and personalized cover letter for the role: ${targetRole}.
-        Use the provided profile/resume content to highlight relevant experience that matches this specific role.
-        Return ONLY a JSON object with: { "coverLetter": "The full text of the letter here...", "tone": "professional" }
-      `;
+      promptText = `Write a cover letter for ${targetRole}. Return JSON: { "coverLetter": "...", "tone": "professional" }`;
     }
 
-    // 4. Handle Content (File vs Raw Text)
-    let aiInput: any[] = [];
-    
+    // ── Multi-Format Logic ──────────────────────────────────────────
+    let aiParts: any[] = [];
     if (file) {
-      console.log(`[JobSearch] Processing file: ${file.name}, type: ${file.type}`);
-      if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
-        const bytes = await file.arrayBuffer();
-        const buffer = Buffer.from(bytes);
-        
-        try {
-          console.log("[JobSearch] Attempting text extraction from PDF...");
-          // Dynamic require to avoid issues with standard ESM bundling of Node.js modules in some environments
-          const pdf = require("pdf-parse");
-          const pdfData = await pdf(buffer);
-          
-          if (pdfData.text && pdfData.text.trim().length > 50) {
-            aiInput = [
-              { text: `${promptText}\n\nResume Content (Extracted):\n${pdfData.text}` }
-            ];
-            console.log("[JobSearch] Text extraction success - using text mode.");
-          } else {
-            throw new Error("Extraction empty or too short");
-          }
-        } catch (parseErr: any) {
-          console.warn("[JobSearch] PDF Text Extraction failed, using multimodal fallback:", parseErr.message);
-          const base64File = buffer.toString("base64");
-          aiInput = [
-            { inlineData: { mimeType: "application/pdf", data: base64File } },
-            { text: promptText },
-          ];
-        }
-      } else if (file.type.startsWith("text/") || file.name.toLowerCase().endsWith(".txt")) {
-        const text = await file.text();
-        aiInput = [
-          { text: `${promptText}\n\nResume/Profile Content:\n${text}` }
-        ];
-      } else if (file.name.toLowerCase().endsWith(".docx")) {
-        // Direct DOCX - improving the message to suggest copy-paste
-        return NextResponse.json(
-          { error: "Direct DOCX processing is currently unavailable. Please export your resume to PDF or copy-paste the text directly into the profile calibration area below." },
-          { status: 400 }
-        );
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const base64File = buffer.toString("base64");
+      
+      // Try text extraction but keep multimodal fallback ready
+      let extractedText = "";
+      try {
+        const pdf = require("pdf-parse");
+        const pdfData = await pdf(buffer);
+        extractedText = pdfData.text || "";
+      } catch (e) {
+        console.warn("[JobSearch] Manual PDF Parse failed, relying on Multimodal Nodes.");
+      }
+
+      if (extractedText.trim().length > 100) {
+        aiParts = [{ text: `${promptText}\n\nRESUME CONTENT:\n${extractedText}` }];
       } else {
-        // Fallback: try reading as text
-        try {
-          const text = await file.text();
-          aiInput = [
-            { text: `${promptText}\n\nResume/Profile Content:\n${text}` }
-          ];
-        } catch {
-          return NextResponse.json(
-            { error: "Unsupported file type. Please use PDF or plain text (.txt)." },
-            { status: 400 }
-          );
-        }
+        // High-fidelity fallback for resume analysis
+        aiParts = [
+          { inlineData: { mimeType: file.type || "application/pdf", data: base64File } },
+          { text: promptText },
+        ];
       }
     } else {
-      // Process direct text input
-      aiInput = [
-        { text: `${promptText}\n\nContent to analyze:\n${content}` }
-      ];
+      aiParts = [{ text: `${promptText}\n\nUSER PROFILE:\n${content}` }];
     }
 
-    // 5. Execute Gemini Analysis with Model Fallback (Hardened for Production)
-    const models = [
-      "gemini-1.5-flash",
-      "gemini-1.5-flash-8b",
-      "gemini-2.0-flash", 
-      "gemini-2.0-flash-exp",
-    ];
-    
-    let lastError: any;
+    // ── Direct Stability Tunnel (V1 Production) ─────────────────────
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json({ error: "Missing GEMINI_API_KEY in Production." }, { status: 500 });
+    }
 
-    for (const modelName of models) {
-        try {
-            console.log(`[JobSearch] Attempting analysis with: ${modelName}`);
-            const model = genAI.getGenerativeModel({
-                model: modelName,
-            });
+    const models = ["gemini-1.5-flash", "gemini-1.5-pro"];
+    let finalResult = "";
+    let lastErr: any;
 
-            // Set generation config separately to ensure compatibility
-            const result = await model.generateContent(aiInput);
-            const response = await result.response;
-            
-            const text = response.text();
-            if (!text || text.length < 5) throw new Error("Empty response from AI");
-            
-            return NextResponse.json({ result: text });
-        } catch (aiError: any) {
-            lastError = aiError;
-            console.warn(`[JobSearch] ${modelName} Failure:`, aiError.message || aiError);
-            continue; 
+    for (const mId of models) {
+      try {
+        console.log(`[JobSearch] Stabilization Tunnel firing: ${mId}`);
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/${mId}:generateContent?key=${apiKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: aiParts }],
+            generationConfig: { responseMimeType: "application/json" }
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          finalResult = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (finalResult) break;
+        } else {
+          lastErr = await res.text();
+          console.warn(`[JobSearch] Node ${mId} offline: ${lastErr}`);
         }
+      } catch (e) {
+        lastErr = e;
+        continue;
+      }
     }
 
-    // If we reach here, all models failed
-    const finalErrorMessage = lastError?.message || "All intelligence nodes failed to process the request.";
-    
-    if (finalErrorMessage.includes("429") || finalErrorMessage.toLowerCase().includes("quota")) {
-      return NextResponse.json(
-        { error: "Intelligence Quota Exceeded. Our AI nodes are currently at capacity. Please try again in 60 seconds.", details: finalErrorMessage },
-        { status: 429 }
-      );
+    if (!finalResult) {
+       return NextResponse.json({ error: "System nodes are temporarily offline. Check your Gemini API billing/quota.", details: lastErr }, { status: 502 });
     }
 
-    throw lastError || new Error("All intelligence nodes failed to process the request.");
+    return NextResponse.json({ result: finalResult });
 
   } catch (error: any) {
-    console.error("ANALYSIS ROUTE ERROR:", error);
-    return NextResponse.json(
-      { error: "Intelligence node processing failed", details: error.message },
-      { status: 500 }
-    );
+    console.error("[JobSearch] CRITICAL FAILURE:", error);
+    return NextResponse.json({ error: "Analysis Pipeline Crashed.", details: error.message }, { status: 500 });
   }
 }
