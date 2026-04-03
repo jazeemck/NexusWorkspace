@@ -108,49 +108,35 @@ export async function POST(req: NextRequest) {
       ];
     }
 
-    // 5. Execute Gemini Analysis with Model Fallback
+    // 5. Execute Gemini Analysis with Model Fallback (Hardened for Production)
     const models = [
-      "gemini-2.0-flash", 
       "gemini-1.5-flash",
       "gemini-1.5-flash-8b",
-      "gemini-2.0-flash-lite-preview-02-05",
-      "gemini-1.5-pro",
+      "gemini-2.0-flash", 
+      "gemini-2.0-flash-exp",
     ];
     
     let lastError: any;
 
     for (const modelName of models) {
         try {
-            console.log(`[JobSearch] Attempting analysis with model: ${modelName}`);
+            console.log(`[JobSearch] Attempting analysis with: ${modelName}`);
             const model = genAI.getGenerativeModel({
                 model: modelName,
-                generationConfig: { responseMimeType: "application/json" }
             });
 
+            // Set generation config separately to ensure compatibility
             const result = await model.generateContent(aiInput);
             const response = await result.response;
             
-            // Safety check
-            if (response.promptFeedback?.blockReason) {
-                console.warn(`[JobSearch] Content blocked by ${modelName}:`, response.promptFeedback.blockReason);
-                continue; // Try next model
-            }
-
             const text = response.text();
-            if (!text) throw new Error("Empty response from AI");
+            if (!text || text.length < 5) throw new Error("Empty response from AI");
             
             return NextResponse.json({ result: text });
         } catch (aiError: any) {
             lastError = aiError;
-            const errorMsg = aiError.message || String(aiError);
-            console.warn(`[JobSearch] Model ${modelName} failed:`, errorMsg);
-            
-            // If it's a 429 quota error, we specifically want to log it but maybe try next model
-            // as some models might have different quotas.
-            if (errorMsg.includes("429") || errorMsg.includes("quota")) {
-                console.error(`[JobSearch] Quota exceeded for ${modelName}`);
-            }
-            continue;
+            console.warn(`[JobSearch] ${modelName} Failure:`, aiError.message || aiError);
+            continue; 
         }
     }
 
