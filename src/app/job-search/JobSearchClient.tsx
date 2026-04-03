@@ -224,6 +224,7 @@ export default function JobSearchClient({ user }: { user: { id: string; email?: 
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Skills, Roles, or Companies..." 
+                suppressHydrationWarning
                 className="w-full bg-transparent border-none text-xl font-bold py-4 focus:ring-0 outline-none placeholder:text-muted-foreground/20"
               />
             </div>
@@ -237,11 +238,12 @@ export default function JobSearchClient({ user }: { user: { id: string; email?: 
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
                 placeholder="Location or 'Remote'..." 
+                suppressHydrationWarning
                 className="w-full bg-transparent border-none text-xl font-bold py-4 focus:ring-0 outline-none placeholder:text-muted-foreground/20"
               />
             </div>
 
-            <button type="submit" className="bg-foreground text-background px-10 py-5 rounded-full font-black uppercase tracking-widest hover:scale-105 transition-all text-sm flex items-center gap-3">
+            <button type="submit" suppressHydrationWarning className="bg-foreground text-background px-10 py-5 rounded-full font-black uppercase tracking-widest hover:scale-105 transition-all text-sm flex items-center gap-3">
                 Execute <ArrowRight className="w-4 h-4" />
             </button>
           </form>
@@ -323,11 +325,12 @@ export default function JobSearchClient({ user }: { user: { id: string; email?: 
             <textarea 
                 value={profileText}
                 onChange={(e) => setProfileText(e.target.value)}
+                suppressHydrationWarning
                 className="w-full bg-white/50 border border-border/50 rounded-3xl p-8 min-h-[220px] outline-none focus:border-foreground/30 transition-all text-sm font-medium shadow-inner"
                 placeholder="Experience with Orbital UI, Neural Bridges, and high-frequency knowledge graphs..."
             />
             <div className="flex items-center gap-4 mt-10">
-                <button onClick={() => handleAnalyzeProfile()} disabled={isAnalyzing} className="bg-black text-white px-10 py-5 rounded-full font-black text-[10px] uppercase tracking-widest hover:scale-105 transition-all shadow-2xl disabled:opacity-50">
+                <button onClick={() => handleAnalyzeProfile()} disabled={isAnalyzing} suppressHydrationWarning className="bg-black text-white px-10 py-5 rounded-full font-black text-[10px] uppercase tracking-widest hover:scale-105 transition-all shadow-2xl disabled:opacity-50">
                     {isAnalyzing ? "Processing..." : "Calibrate Matrix"}
                 </button>
             </div>

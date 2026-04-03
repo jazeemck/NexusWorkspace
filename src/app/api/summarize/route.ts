@@ -96,7 +96,7 @@ async function analyzeWithGemini(
   category: string,
   durationSeconds: number | null
 ): Promise<GeminiResult> {
-  const models = ["gemini-1.5-flash-latest", "gemini-1.5-pro-latest"];
+  const models = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"];
   const durationText = durationSeconds ? formatDuration(durationSeconds) : "Unknown";
   const apiKey = process.env.GEMINI_API_KEY;
   let lastError: any;
@@ -118,7 +118,7 @@ Return ONLY raw JSON.`;
 
   for (const mId of models) {
     try {
-      console.log(`[Summarize] Stabilizing Node: ${mId}`);
+      console.log(`[Summarize] Stabilizing Node: ${mId} via v1beta`);
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${mId}:generateContent?key=${apiKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -143,7 +143,7 @@ Return ONLY raw JSON.`;
         }
       } else {
         lastError = await res.text();
-        console.warn(`[Summarize] Node ${mId} offline: ${lastError}`);
+        console.warn(`[Summarize] Node ${mId} offline: ${lastError.substring(0, 50)}...`);
       }
     } catch (e) {
       lastError = e;

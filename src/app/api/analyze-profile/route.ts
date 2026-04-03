@@ -1,93 +1,54 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-// Initialize Gemini with API Key from environment
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+import { createClient } from "@/utils/supabase/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData();
-    const file = formData.get("file") as File | null;
-    const content = formData.get("content") as string | null;
-    const action = (formData.get("action") as string) || "extract-skills";
-    const targetRole = (formData.get("targetRole") as string) || "";
-
-    if (!file && !content) {
-      return NextResponse.json({ error: "Empty profile payload." }, { status: 400 });
-    }
-
-    // ── Pre-Extraction ──────────────────────────────────────────────
-    let promptText = "Analyze this resume/profile and provide professional structured insights.";
-    if (action === "extract-skills") {
-      promptText = `You are an expert recruiter. Extract a JSON array of all tech and soft skills. Return ONLY: ["React", "AI", ...]`;
-    } else if (action === "gap-analysis") {
-      promptText = `Compare profile to ${targetRole}. Identify missing skills. Return JSON: { "gaps": [], "matched": [], "confidence": 0, "recommendations": [] }`;
-    } else if (action === "generate-cover-letter") {
-      promptText = `Write a cover letter for ${targetRole}. Return JSON: { "coverLetter": "...", "tone": "professional" }`;
-    }
-
-    // ── Multi-Format Logic ──────────────────────────────────────────
-    let aiParts: any[] = [];
-    if (file) {
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const base64File = buffer.toString("base64");
-      
-      // Try text extraction but keep multimodal fallback ready
-      let extractedText = "";
-      try {
-        const pdf = require("pdf-parse");
-        const pdfData = await pdf(buffer);
-        extractedText = pdfData.text || "";
-      } catch (e) {
-        console.warn("[JobSearch] Manual PDF Parse failed, relying on Multimodal Nodes.");
-      }
-
-      if (extractedText.trim().length > 100) {
-        aiParts = [{ text: `${promptText}\n\nRESUME CONTENT:\n${extractedText}` }];
-      } else {
-        // High-fidelity fallback for resume analysis
-        aiParts = [
-          { inlineData: { mimeType: file.type || "application/pdf", data: base64File } },
-          { text: promptText },
-        ];
-      }
-    } else {
-      aiParts = [{ text: `${promptText}\n\nUSER PROFILE:\n${content}` }];
-    }
-
-    // ── Direct Stability Tunnel (V1 Production) ─────────────────────
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id;
     const apiKey = process.env.GEMINI_API_KEY;
+
     if (!apiKey) {
       return NextResponse.json({ error: "Missing GEMINI_API_KEY in Production." }, { status: 500 });
     }
 
-    // ── Phase 1: Deep Discovery Radar ──────────────────────────────────────────
-    try {
-      const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-      const listData = await listRes.json();
-      const available = listData.models ? listData.models.map((m: any) => m.name.split("/").pop()) : [];
-      console.log(`[JobSearch] Deep Discovery Found: ${available.join(", ")}`);
-    } catch (e) {
-      console.warn("[JobSearch] Radar scan failed.");
-    }
+    const formData = await req.formData();
+    const file = formData.get("file") as File | null;
+    const content = formData.get("content") as string | null;
+    const action = formData.get("action") as string || "extract-skills";
 
-    const potentialModels = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp", "gemini-1.5-flash-8b"];
-    let finalResult = "";
-    let lastErr: any;
+    let profileText = content || "";
 
-    for (const modelId of potentialModels) {
-      if (finalResult) break;
+    if (file) {
+      // ── Step 1: Multimodal Extraction Fallback ────────────────────────────────
+      // We pass the raw bytes directly to Gemini to allow visual analysis if text extraction fails.
+      const buffer = await file.arrayBuffer();
+      const base64 = Buffer.from(buffer).toString("base64");
       
-      // Try both stable and beta endpoints as fallback across regions
-      const endpoints = [
-        `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`,
-        `https://generativelanguage.googleapis.com/v1/models/${modelId}:generateContent?key=${apiKey}`
+      const aiParts = [
+        { inlineData: { data: base64, mimeType: file.type } },
+        { text: "This is a professional document (Resume/Profile). Please analyze it thoroughly." }
       ];
 
-      for (const url of endpoints) {
+      if (action === "extract-skills") {
+        aiParts.push({ text: "Assignment: Extract all technical and soft skills into a JSON array of strings. Return ONLY the raw JSON array. Example: [\"React\", \"Accountant\", \"Excel\"]." });
+      } else {
+        const role = formData.get("targetRole") as string || "the target role";
+        aiParts.push({ text: `Assignment: Write a world-class, high-density cover letter for ${role}. Tailor it intensely based on this resume. Follow the tone of a high-performance executive. Return ONLY raw JSON in this format: { \"coverLetter\": \"string\" }.` });
+      }
+
+      // ── Phase 2: Dynamic Intelligence Discovery ───────────────────────────────────
+      const potentialModels = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp", "gemini-2.0-flash"];
+      let finalResult = "";
+      let lastErr: any;
+
+      for (const modelId of potentialModels) {
+        if (finalResult) break;
+        
         try {
-          console.log(`[JobSearch] Intelligence Discovery: Probing ${modelId} at ${url.includes('v1beta') ? 'v1beta' : 'v1'}`);
-          const res = await fetch(url, {
+          console.log(`[JobSearch] Intelligence Discovery: Probing ${modelId} at v1beta`);
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -112,13 +73,16 @@ export async function POST(req: NextRequest) {
           continue;
         }
       }
+
+      if (!finalResult) {
+         return NextResponse.json({ error: "System nodes are temporarily offline. Check your Gemini API billing/quota.", details: lastErr }, { status: 502 });
+      }
+
+      return NextResponse.json({ result: finalResult });
     }
 
-    if (!finalResult) {
-       return NextResponse.json({ error: "System nodes are temporarily offline. Check your Gemini API billing/quota.", details: lastErr }, { status: 502 });
-    }
-
-    return NextResponse.json({ result: finalResult });
+    // ── Simple Text Flow (If no file provided) ───────────────────────────────────
+    return NextResponse.json({ error: "Resume upload is currently required for precision matching." }, { status: 400 });
 
   } catch (error: any) {
     console.error("[JobSearch] CRITICAL FAILURE:", error);
