@@ -89,41 +89,22 @@ function formatDuration(seconds: number): string {
   return [h, m, s].map(v => v.toString().padStart(2, '0')).join(':');
 }
 
-async function analyzeWithGemini(content: string, videoTitle: string, targetLanguage: string, category: string, durationSeconds: number | null): Promise<GeminiResult> {
-  // Use Gemini 1.5 versions which are current and stable
-  const models = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro", "gemini-2.0-flash-exp"];
+async function analyzeWithGemini(
+  content: string,
+  videoTitle: string,
+  targetLanguage: string,
+  category: string,
+  durationSeconds: number | null
+): Promise<GeminiResult> {
+  const models = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"];
   const durationText = durationSeconds ? formatDuration(durationSeconds) : "Unknown";
+  const apiKey = process.env.GEMINI_API_KEY;
   let lastError: any;
 
-  for (const modelName of models) {
-    try {
-      console.log(`[AI] Attempting intelligence synthesis with ${modelName} for: "${videoTitle}"`);
-      const systemPrompt = `You are a world-class YouTube intelligence analyst. Your objective is to synthesize complex video transcripts into high-density, structured JSON data. You must produce content-rich responses based strictly on the provided transcript.`;
-
-      const model = genAI.getGenerativeModel({
-        model: modelName,
-        systemInstruction: systemPrompt,
-        generationConfig: { 
-          responseMimeType: "application/json",
-          temperature: 0.1 
-        }
-      });
-
-      const prompt = `CONTENT SOURCE: YouTube Video Transcript
-VIDEO TITLE: ${videoTitle}
-VIDEO DURATION: ${durationText}
-TARGET LANGUAGE: ${targetLanguage}
-CATEGORY: ${category}
-
-TRANSCRIPT CONTENT:
----
-${content}
----
-
-ASSIGNMENT:
-Generate a high-fidelity intelligence report in ${targetLanguage} following this JSON schema:
-1. "intelligentSummary": A 3-5 paragraph deep-dive into the core thesis, supporting arguments, and expert insights found in the transcript.
-2. "timelineSummary": A chronological mapping (8-12 segments) with timestamps (e.g. "0:00", "5:20"), high-impact titles, and single-sentence executive descriptions.
+  const assignment = `
+Generate a high-fidelity intelligence report in ${targetLanguage}:
+1. "intelligentSummary": A 3-5 paragraph deep-dive into the core thesis and expert insights.
+2. "timelineSummary": A chronological mapping (8-12 segments) with timestamps, titles, and descriptions.
 
 SCHEMA:
 {
@@ -133,50 +114,48 @@ SCHEMA:
   ]
 }
 
-Return ONLY the raw JSON object. No markdown formatting, no preamble.`;
+Return ONLY raw JSON.`;
 
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      let text = response.text().trim();
+  for (const mId of models) {
+    try {
+      console.log(`[Summarize] Stabilizing Node: ${mId}`);
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/${mId}:generateContent?key=${apiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ 
+            parts: [{ 
+              text: `TITLE: ${videoTitle}\nDURATION: ${durationText}\nCATEGORY: ${category}\n\nTRANSCRIPT:\n${content}\n\n${assignment}` 
+            }] 
+          }],
+          generationConfig: { 
+            response_mime_type: "application/json",
+            temperature: 0.1
+          }
+        })
+      });
 
-      try {
-        const parsed = JSON.parse(text) as GeminiResult;
-        console.log(`[AI] Intelligence synthesis complete via ${modelName}`);
-        return parsed;
-      } catch {
-        text = text.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
-        const parsed = JSON.parse(text) as GeminiResult;
-        console.log(`[AI] Intelligence synthesis complete via ${modelName} (after cleanup)`);
-        return parsed;
+      if (res.ok) {
+        const data = await res.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+             // Robust JSON extraction in case AI adds markdown brackets
+             let sanitized = text.trim();
+             if (sanitized.startsWith("```json")) sanitized = sanitized.replace(/^```json\n|```$/g, "");
+             else if (sanitized.startsWith("```")) sanitized = sanitized.replace(/^```\n|```$/g, "");
+             return JSON.parse(sanitized);
+        }
+      } else {
+        lastError = await res.text();
+        console.warn(`[Summarize] Node ${mId} offline: ${lastError}`);
       }
-    } catch (err: any) {
-      lastError = err;
-      console.error(`[AI] ${modelName} Node Failure:`, err.message || err);
-      
-      const msg = err.message?.toLowerCase() || "";
-      if (msg.includes("leaked") || msg.includes("reported as leaked")) {
-        throw new Error("CRITICAL: Your Gemini API key has been reported as leaked and disabled by Google.");
-      }
-      
-      // If it's a 429, wait a tiny bit or try next model
-      if (msg.includes("429")) {
-          // Pause briefly if possible in this environment
-      }
-
-      if (msg.includes("safety") || msg.includes("finish_reason") || msg.includes("blocked")) {
-        // For 'All Videos', we might want to try a less restrictive model or noted as blocked
-        console.warn("[AI] Content safety block - trying fallback model if any.");
-      }
-      continue; 
+    } catch (e) {
+      lastError = e;
+      continue;
     }
   }
 
-  const finalMsg = lastError?.message || "All intelligence nodes failed to respond.";
-  if (finalMsg.includes("404") && finalMsg.includes("gemini")) {
-    throw new Error("Specified Gemini model is unavailable. Ensure your API key is correct and has access to Gemini 1.5 Flash.");
-  }
-  
-  throw lastError;
+  throw lastError || new Error("All Intelligence Nodes failed to generate report.");
 }
 
 export async function POST(req: NextRequest) {
