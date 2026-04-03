@@ -266,6 +266,14 @@ export async function POST(req: NextRequest) {
             if (titleMatch) videoTitle = titleMatch[1].replace(" - YouTube", "").trim();
         }
 
+        // Check for 'Unavailable' OR 'Deleted' OR 'Private'
+        if (html.includes("Video unavailable") || html.includes("This video isn't available anymore") || html.includes("Private video")) {
+          return NextResponse.json(
+            { error: "This video is private, deleted, or otherwise unavailable on YouTube. Our intelligence engine cannot process non-existent content." },
+            { status: 404 }
+          );
+        }
+
         // Extract description
         const descMatch = html.match(/"shortDescription":"(.+?)","isCrawlable"/);
         if (descMatch) {
