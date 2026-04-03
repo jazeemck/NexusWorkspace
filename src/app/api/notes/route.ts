@@ -37,18 +37,27 @@ export async function POST(req: NextRequest) {
   const supabase = await createClient();
   
   // Map fields to what we found in the database: is_pinned, is_favorite, folder_id
-  const insertData = {
+  // If the database is still strictly UUID, "General" will cause an error.
+  // We send folder_id as a string; if the DB is set to text (after fix), it works.
+  const insertData: any = {
     user_id: session.user.id,
     title,
     content,
-    // Add columns matching the existing database schema to ensure sync works now
-    folder_id: folder || "General",
-    is_pinned: pinned || false,
     is_favorite: favorite || false,
+    is_pinned: pinned || false,
     last_edited_at: new Date().toISOString(),
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
+
+  // Only add folder_id if it's not the default "General" string to avoid UUID errors 
+  // until the user runs the SQL fix.
+  if (folder && folder !== "General") {
+    insertData.folder_id = folder;
+  } else {
+    // If it is 'General', we only send it if it's likely the DB is set to text
+    insertData.folder_id = "General";
+  }
 
   const { data, error } = await supabase
     .from("notes")

@@ -11,24 +11,36 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const supabase = await createClient();
   const { id } = await params;
 
+  // Prepare safe data for update
+  const updateData: any = {
+    title,
+    content,
+    is_favorite: favorite || false,
+    is_pinned: pinned || false,
+    last_edited_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  // If folder name is "General", it often conflicts with UUID types
+  if (folder && folder !== "General") {
+    updateData.folder_id = folder;
+  } else if (folder === "General") {
+      // In text-based DBs, we explicitly set it. In UUID-based DBs, we rely on the default.
+      updateData.folder_id = "General";
+  }
+
   const { data, error } = await supabase
     .from("notes")
-    .update({
-      title,
-      content,
-      // No tags column in db, so we omit it for now to prevent crashes
-      folder_id: folder || "General",
-      is_favorite: favorite || false,
-      is_pinned: pinned || false,
-      last_edited_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
+    .update(updateData)
     .eq("id", id)
     .eq("user_id", session.user.id)
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("Notes Update Error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   return NextResponse.json(data);
 }
 

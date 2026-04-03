@@ -26,7 +26,15 @@ export function extractVideoId(url: string): string | null {
     if (parsed.hostname === "youtu.be") return parsed.pathname.slice(1);
     if (parsed.pathname.startsWith("/shorts/")) return parsed.pathname.split("/")[2];
     if (parsed.pathname.startsWith("/live/")) return parsed.pathname.split("/")[2];
-    return parsed.searchParams.get("v");
+    const vParam = parsed.searchParams.get("v");
+    if (vParam) return vParam;
+    
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    if (segments.length > 0) {
+        const last = segments[segments.length - 1];
+        if (last.length === 11) return last;
+    }
+    return null;
   } catch {
     return null;
   }

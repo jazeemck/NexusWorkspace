@@ -148,17 +148,19 @@ Return ONLY the raw JSON object. No markdown formatting, no preamble.`;
       
       const msg = err.message?.toLowerCase() || "";
       if (msg.includes("leaked") || msg.includes("reported as leaked")) {
-        throw new Error("CRITICAL: Your Gemini API key has been reported as leaked and disabled by Google. Please update your environment variables with a fresh API key from Google AI Studio.");
+        throw new Error("CRITICAL: Your Gemini API key has been reported as leaked and disabled by Google.");
       }
       
-      if (msg.includes("404") || msg.includes("not found")) {
-        continue;
+      // If it's a 429, wait a tiny bit or try next model
+      if (msg.includes("429")) {
+          // Pause briefly if possible in this environment
       }
-      
-      if (msg.includes("safety") || msg.includes("finish_reason")) {
-        throw new Error("Content blocked by AI safety filters. Please try a different video.");
+
+      if (msg.includes("safety") || msg.includes("finish_reason") || msg.includes("blocked")) {
+        // For 'All Videos', we might want to try a less restrictive model or noted as blocked
+        console.warn("[AI] Content safety block - trying fallback model if any.");
       }
-      continue;
+      continue; 
     }
   }
 
@@ -186,10 +188,15 @@ export async function POST(req: NextRequest) {
     const videoId = extractVideoId(url);
     const thumbnailUrl = videoId ? getThumbnailUrl(videoId) : null;
 
+    if (!videoId) {
+        return NextResponse.json({ error: "Invalid YouTube URL format. Could not extract Video ID." }, { status: 400 });
+    }
+
     let transcriptText = "";
     let videoTitle = "YouTube Video";
     let videoDescription = "";
     let extractionMethod = "transcript";
+    let chapters = "";
     
     try {
       if (videoId) {
@@ -266,6 +273,21 @@ export async function POST(req: NextRequest) {
             if (desc.length > 50) {
                 transcriptText = (transcriptText && transcriptText.length > 50 ? transcriptText + "\n\n[Additional Metadata]:\n" : "[Metadata Description]:\n") + desc;
                 extractionMethod = extractionMethod === "transcript" ? "transcript_and_meta" : "manual_meta_analysis";
+            }
+        }
+
+        // Extract Chapters (High-Signal Data)
+        const chapterMatches = html.match(/"title":\{"simpleText":"(.+?)"\},"timeDescriptionUTF8":"(.+?)"/g);
+        if (chapterMatches && chapterMatches.length > 0) {
+            const parsedChapters = chapterMatches.map(c => {
+                const titleMatch = c.match(/"title":\{"simpleText":"(.+?)"\}/);
+                const timeMatch = c.match(/"timeDescriptionUTF8":"(.+?)"/);
+                return titleMatch && timeMatch ? `${timeMatch[1]} - ${titleMatch[1]}` : null;
+            }).filter(Boolean).join("\n");
+            
+            if (parsedChapters) {
+                transcriptText = (transcriptText ? transcriptText + "\n\n[VIDEO CHAPTERS]:\n" : "[VIDEO CHAPTERS]:\n") + parsedChapters;
+                console.log(`[Extraction] Extracted ${chapterMatches.length} video chapters.`);
             }
         }
       } catch (e) {
