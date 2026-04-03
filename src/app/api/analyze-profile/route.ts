@@ -61,32 +61,47 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing GEMINI_API_KEY in Production." }, { status: 500 });
     }
 
-    const models = ["gemini-1.5-flash", "gemini-1.5-pro"];
+    // ── Phase 2: Dynamic Intelligence Discovery ───────────────────────────────────
+    const potentialModels = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp", "gemini-pro"];
     let finalResult = "";
     let lastErr: any;
 
-    for (const mId of models) {
-      try {
-        console.log(`[JobSearch] stabilization Tunnel firing: ${mId}`);
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${mId}:generateContent?key=${apiKey}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: aiParts }]
-          })
-        });
+    for (const modelId of potentialModels) {
+      if (finalResult) break;
+      
+      // Try both stable and beta endpoints as fallback across regions
+      const endpoints = [
+        `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1/models/${modelId}:generateContent?key=${apiKey}`
+      ];
 
-        if (res.ok) {
-          const data = await res.json();
-          finalResult = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (finalResult) break;
-        } else {
-          lastErr = await res.text();
-          console.warn(`[JobSearch] Node ${mId} offline: ${lastErr}`);
+      for (const url of endpoints) {
+        try {
+          console.log(`[JobSearch] Intelligence Discovery: Probing ${modelId} at ${url.includes('v1beta') ? 'v1beta' : 'v1'}`);
+          const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: aiParts }]
+            })
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text) {
+              finalResult = text;
+              console.log(`[JobSearch] Target Locked: Successfully used ${modelId}`);
+              break;
+            }
+          } else {
+            lastErr = await res.text();
+            console.warn(`[JobSearch] Node ${modelId} unreachable: ${lastErr.substring(0, 50)}...`);
+          }
+        } catch (e) {
+          lastErr = e;
+          continue;
         }
-      } catch (e) {
-        lastErr = e;
-        continue;
       }
     }
 
