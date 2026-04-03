@@ -61,8 +61,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing GEMINI_API_KEY in Production." }, { status: 500 });
     }
 
-    // ── Phase 2: Dynamic Intelligence Discovery ───────────────────────────────────
-    const potentialModels = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp", "gemini-pro"];
+    // ── Phase 1: Deep Discovery Radar ──────────────────────────────────────────
+    try {
+      const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+      const listData = await listRes.json();
+      const available = listData.models ? listData.models.map((m: any) => m.name.split("/").pop()) : [];
+      console.log(`[JobSearch] Deep Discovery Found: ${available.join(", ")}`);
+    } catch (e) {
+      console.warn("[JobSearch] Radar scan failed.");
+    }
+
+    const potentialModels = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp", "gemini-1.5-flash-8b"];
     let finalResult = "";
     let lastErr: any;
 
