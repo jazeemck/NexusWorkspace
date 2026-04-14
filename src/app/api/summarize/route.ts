@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { isValidYouTubeUrl, extractVideoId, getThumbnailUrl } from "@/lib/utils";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { YoutubeTranscript } from 'youtube-transcript';
-
 import { authOptions } from "@/lib/auth";
 import { getServerSession } from "next-auth/next";
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+import { callGemini, GEMINI_BUSY_MESSAGE } from "@/lib/gemini";
 
 interface FirecrawlResponse {
   success: boolean;
@@ -96,10 +93,7 @@ async function analyzeWithGemini(
   category: string,
   durationSeconds: number | null
 ): Promise<GeminiResult> {
-  const models = ["gemini-2.0-flash"];
   const durationText = durationSeconds ? formatDuration(durationSeconds) : "Unknown";
-  const apiKey = process.env.GEMINI_API_KEY;
-  let lastError: any;
 
   const assignment = `
   Generate a high-density intelligence report in ${targetLanguage}.
@@ -118,49 +112,17 @@ async function analyzeWithGemini(
 
   Return ONLY raw JSON with zero markdown formatting.`;
 
-  for (const mId of models) {
-    try {
-      console.log(`[Summarize] Stabilizing Node: ${mId} via v1beta`);
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${mId}:generateContent?key=${apiKey}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ 
-            parts: [{ 
-              text: `TITLE: ${videoTitle}\nDURATION: ${durationText}\nCATEGORY: ${category}\n\nTRANSCRIPT:\n${content}\n\n${assignment}` 
-            }] 
-          }]
-        })
-      });
+  const prompt = `TITLE: ${videoTitle}\nDURATION: ${durationText}\nCATEGORY: ${category}\n\nTRANSCRIPT:\n${content}\n\n${assignment}`;
 
-      if (res.ok) {
-        const data = await res.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (text) {
-             let sanitized = text.trim();
-             // Robust JSON extraction
-             const jsonMatch = sanitized.match(/\[\s*\{[\s\S]*\}\s*\]|\{\s*"[\s\S]*":[\s\S]*\}/);
-             if (jsonMatch) {
-                sanitized = jsonMatch[0];
-             }
-             
-             // Removal of common AI markdown artifacts
-             if (sanitized.startsWith("```json")) sanitized = sanitized.replace(/^```json\n|```$/g, "");
-             else if (sanitized.startsWith("```")) sanitized = sanitized.replace(/^```\n|```$/g, "");
-             
-             return JSON.parse(sanitized);
-        }
-      } else {
-        lastError = await res.text();
-        console.warn(`[Summarize] Node ${mId} offline: ${lastError.substring(0, 50)}...`);
-      }
-    } catch (e) {
-      lastError = e;
-      continue;
-    }
-  }
+  const { text } = await callGemini({ parts: [{ text: prompt }] });
 
-  throw lastError || new Error("All Intelligence Nodes failed to generate report.");
+  let sanitized = text.trim();
+  const jsonMatch = sanitized.match(/\[\s*\{[\s\S]*\}\s*\]|\{\s*"[\s\S]*":[\s\S]*\}/);
+  if (jsonMatch) sanitized = jsonMatch[0];
+  if (sanitized.startsWith("```json")) sanitized = sanitized.replace(/^```json\n|```$/g, "");
+  else if (sanitized.startsWith("```")) sanitized = sanitized.replace(/^```\n|```$/g, "");
+
+  return JSON.parse(sanitized);
 }
 
 export async function POST(req: NextRequest) {
@@ -312,13 +274,18 @@ export async function POST(req: NextRequest) {
       geminiResult = await analyzeWithGemini(transcriptText, videoTitle, targetLanguage, category, durationSeconds);
     } catch (aiErr: any) {
       console.error("[Summarize] Gemini Analysis Critical Failure:", aiErr);
-      
+
       const errorMessage = aiErr.message || String(aiErr);
-      
-      if (errorMessage.includes("429") || errorMessage.toLowerCase().includes("quota")) {
-        return NextResponse.json({ 
-            error: "Gemini API Quota Exceeded. Please try again in 60 seconds.",
-            code: "QUOTA_EXCEEDED"
+
+      const isBusy =
+        errorMessage === GEMINI_BUSY_MESSAGE ||
+        errorMessage.includes("429") ||
+        errorMessage.toLowerCase().includes("quota");
+
+      if (isBusy) {
+        return NextResponse.json({
+          error: "Our AI service is temporarily busy. Please try again in a few minutes.",
+          code: "QUOTA_EXCEEDED"
         }, { status: 429 });
       }
 
