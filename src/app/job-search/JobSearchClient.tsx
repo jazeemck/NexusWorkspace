@@ -149,7 +149,13 @@ export default function JobSearchClient({ user }: { user: { id: string; email?: 
       }
     } catch (err: any) {
       console.error("Analysis Error:", err);
-      toast.error(err.message || "Analysis failed.");
+      const isQuota = err.message?.toLowerCase().includes("quota reached") ||
+                      err.message?.toLowerCase().includes("try again tomorrow");
+      toast.error(
+        isQuota
+          ? "Free AI quota reached. Please try again tomorrow or contact support."
+          : err.message || "Analysis failed."
+      );
     } finally {
       setIsAnalyzing(false);
       toast.dismiss(loadingToast);
@@ -189,7 +195,15 @@ export default function JobSearchClient({ user }: { user: { id: string; email?: 
         toast.success("AI Synthesis Complete", { id: loadToast });
     } catch (err) {
         console.error(err);
-        toast.error("Intelligence node fail.", { id: loadToast });
+        const errMsg = (err as any)?.message || "";
+        const isQuota = errMsg.toLowerCase().includes("quota reached") ||
+                        errMsg.toLowerCase().includes("try again tomorrow");
+        toast.error(
+          isQuota
+            ? "Free AI quota reached. Please try again tomorrow or contact support."
+            : "AI Synthesis temporarily unavailable. Please try again.",
+          { id: loadToast }
+        );
     } finally {
         setIsGeneratingCL(false);
     }

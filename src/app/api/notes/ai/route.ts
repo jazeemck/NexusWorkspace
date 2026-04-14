@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callGemini, GEMINI_BUSY_MESSAGE } from "@/lib/gemini";
+import { callGemini, GEMINI_BUSY_MESSAGE, GEMINI_QUOTA_MESSAGE } from "@/lib/gemini";
 
 export async function POST(req: NextRequest) {
   try {
@@ -28,6 +28,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ result: text });
   } catch (err: any) {
     console.error("[Notes AI] Error:", err);
+
+    if (err.message === GEMINI_QUOTA_MESSAGE) {
+      return NextResponse.json(
+        { error: "Free AI quota reached. Please try again tomorrow or contact support." },
+        { status: 429 }
+      );
+    }
 
     const isBusy = err.message === GEMINI_BUSY_MESSAGE
       || err.message?.includes("429")

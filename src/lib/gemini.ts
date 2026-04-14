@@ -2,21 +2,28 @@
  * Shared Gemini API utility
  *
  * Strategy (serverless-safe):
- *  1. Try each model in GEMINI_MODEL_CHAIN once — no blocking sleeps.
- *  2. On 429 / 503, immediately move to the next model in the chain.
- *  3. A 10-second in-process cooldown prevents hammering a model that just
- *     returned 429. (Short window so users aren't locked out for long.)
- *  4. If every model is exhausted, throw GEMINI_BUSY_MESSAGE for callers to
- *     surface as a friendly UI error.
+ *  1. Build a list of API keys: [GEMINI_API_KEY, GEMINI_API_KEY_BACKUP?]
+ *  2. For each key, try every model in GEMINI_MODEL_CHAIN once (no sleeps).
+ *  3. On 429 / 503, immediately move to the next model; if all models on
+ *     the current key are exhausted with 429, switch to the backup key.
+ *  4. A 10-second in-process cooldown avoids hammering the same
+ *     (key × model) combination that just returned 429.
+ *  5. If every key + model combination is exhausted, throw
+ *     GEMINI_QUOTA_MESSAGE so callers can show a friendly UI error.
  *
  * Model configuration lives in @/lib/ai-config.ts.
- * Update the model name there — do NOT hardcode model strings here.
+ * Do NOT hardcode model strings here.
  */
 
 import { GEMINI_MODEL_CHAIN, geminiUrl } from "@/lib/ai-config";
 
+/** Thrown when the request can't be processed but the user should retry. */
 export const GEMINI_BUSY_MESSAGE =
   "Our AI service is temporarily busy. Please try again in a few minutes.";
+
+/** Thrown when all API keys and models are exhausted (free quota fully used). */
+export const GEMINI_QUOTA_MESSAGE =
+  "Free AI quota reached. Please try again tomorrow or contact support.";
 
 // ---------- types ----------------------------------------------------------
 
@@ -35,21 +42,28 @@ export interface GeminiCallOptions {
 export interface GeminiResult {
   text: string;
   model: string;
+  keyUsed: "primary" | "backup";
 }
 
-// ---------- lightweight rate-limit signal (10 s window) --------------------
+// ---------- per-key-per-model rate-limit signal (10 s window) --------------
+// Cache key format: "<apiKeyPrefix>|<modelId>"
 
 const rateLimitedAt = new Map<string, number>();
 const SKIP_WINDOW_MS = 10_000;
 
-function shouldSkipModel(modelId: string): boolean {
-  const ts = rateLimitedAt.get(modelId);
+function cacheKey(apiKey: string, modelId: string) {
+  // Use only the last 6 chars of the key as identifier (avoid logging secrets)
+  return `${apiKey.slice(-6)}|${modelId}`;
+}
+
+function shouldSkip(apiKey: string, modelId: string): boolean {
+  const ts = rateLimitedAt.get(cacheKey(apiKey, modelId));
   if (!ts) return false;
   return Date.now() - ts < SKIP_WINDOW_MS;
 }
 
-function recordRateLimit(modelId: string) {
-  rateLimitedAt.set(modelId, Date.now());
+function recordRateLimit(apiKey: string, modelId: string) {
+  rateLimitedAt.set(cacheKey(apiKey, modelId), Date.now());
 }
 
 // ---------- retryable status codes ----------------------------------------
@@ -61,72 +75,95 @@ const RETRYABLE_STATUSES = new Set([429, 503]);
 /**
  * Call the Gemini generateContent REST API.
  *
- * Tries each model in `modelChain` once.  On 429 / 503 it immediately moves
- * to the next model without sleeping.  Throws GEMINI_BUSY_MESSAGE when all
- * models are exhausted.
+ * Key rotation: tries the primary key (GEMINI_API_KEY) first.  If all
+ * models on that key return 429/503, automatically switches to the backup
+ * key (GEMINI_API_KEY_BACKUP) if one is configured.
+ *
+ * Throws GEMINI_QUOTA_MESSAGE when all keys and models are exhausted.
  */
 export async function callGemini(opts: GeminiCallOptions): Promise<GeminiResult> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("Missing GEMINI_API_KEY environment variable.");
+  const primaryKey = process.env.GEMINI_API_KEY;
+  const backupKey  = process.env.GEMINI_API_KEY_BACKUP;
+
+  if (!primaryKey) {
+    throw new Error("Missing GEMINI_API_KEY environment variable.");
+  }
+
+  // Build the key list — backup is optional
+  const apiKeys: Array<{ key: string; label: "primary" | "backup" }> = [
+    { key: primaryKey, label: "primary" },
+    ...(backupKey ? [{ key: backupKey, label: "backup" as const }] : []),
+  ];
 
   const modelChain = opts.modelChain ?? GEMINI_MODEL_CHAIN;
 
-  for (const modelId of modelChain) {
-    if (shouldSkipModel(modelId)) {
-      console.warn(`[Gemini] Skipping ${modelId} — rate-limited ${SKIP_WINDOW_MS / 1000}s ago.`);
-      continue;
-    }
+  for (const { key: apiKey, label: keyLabel } of apiKeys) {
+    console.log(`[Gemini] Trying ${keyLabel} key…`);
+    let anyModelWorked = false; // track if at least one attempt was non-429
 
-    try {
-      console.log(`[Gemini] Calling ${modelId}…`);
+    for (const modelId of modelChain) {
+      if (shouldSkip(apiKey, modelId)) {
+        console.warn(`[Gemini] Skipping ${modelId} (${keyLabel}) — rate-limited recently.`);
+        continue;
+      }
 
-      const res = await fetch(geminiUrl(modelId, apiKey), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts: opts.parts }] }),
-      });
+      try {
+        console.log(`[Gemini] ${keyLabel}/${modelId} — calling…`);
 
-      // ── Success ──────────────────────────────────────────────────────────
-      if (res.ok) {
-        const data = await res.json();
-        const text: string | undefined =
-          data.candidates?.[0]?.content?.parts?.[0]?.text;
+        const res = await fetch(geminiUrl(modelId, apiKey), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ parts: opts.parts }] }),
+        });
 
-        if (text) {
-          console.log(`[Gemini] ✓ Success with ${modelId}`);
-          return { text, model: modelId };
+        // ── Success ────────────────────────────────────────────────────────
+        if (res.ok) {
+          const data = await res.json();
+          const text: string | undefined =
+            data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+          if (text) {
+            console.log(`[Gemini] ✓ Success — ${keyLabel}/${modelId}`);
+            return { text, model: modelId, keyUsed: keyLabel };
+          }
+
+          console.warn(`[Gemini] ${keyLabel}/${modelId} returned empty candidates.`);
+          anyModelWorked = true; // got a 200, just no content
+          continue;
         }
 
-        console.warn(`[Gemini] ${modelId} returned empty candidates. Trying next.`);
+        // ── Rate-limited / temporarily unavailable ─────────────────────────
+        const status = res.status;
+        await res.text().catch(() => ""); // drain body
+
+        if (RETRYABLE_STATUSES.has(status)) {
+          console.warn(`[Gemini] ${keyLabel}/${modelId} → ${status}.`);
+          if (status === 429) recordRateLimit(apiKey, modelId);
+          continue; // try next model on this key
+        }
+
+        // ── Non-retryable (400, 401, 404, …) ──────────────────────────────
+        const errBody = await res.clone().text().catch(() => "");
+        console.error(`[Gemini] ${keyLabel}/${modelId} non-retryable ${status}: ${errBody.substring(0, 200)}`);
+        throw new Error(`Gemini API error ${status}: ${errBody.substring(0, 200)}`);
+
+      } catch (err: any) {
+        if (
+          err.message?.startsWith("Gemini API error") ||
+          err.message?.startsWith("Missing GEMINI_API_KEY")
+        ) {
+          throw err; // re-throw typed errors
+        }
+        console.error(`[Gemini] ${keyLabel}/${modelId} network error:`, err?.message);
         continue;
       }
-
-      // ── Rate-limited / temporarily unavailable ───────────────────────────
-      const status = res.status;
-      const body = await res.text().catch(() => "");
-
-      if (RETRYABLE_STATUSES.has(status)) {
-        console.warn(`[Gemini] ${modelId} → ${status}. Moving to fallback.`);
-        if (status === 429) recordRateLimit(modelId);
-        continue;
-      }
-
-      // ── Non-retryable (400, 401, 404, …) — fail immediately ──────────────
-      console.error(`[Gemini] ${modelId} non-retryable ${status}: ${body.substring(0, 200)}`);
-      throw new Error(`Gemini API error ${status}: ${body.substring(0, 200)}`);
-
-    } catch (err: any) {
-      if (
-        err.message?.startsWith("Gemini API error") ||
-        err.message?.startsWith("Missing GEMINI_API_KEY")
-      ) {
-        throw err;
-      }
-      console.error(`[Gemini] ${modelId} network error:`, err?.message);
-      continue;
     }
+
+    // If every model on this key returned 429, move to backup key.
+    console.warn(`[Gemini] All models exhausted on ${keyLabel} key.`);
   }
 
-  console.error("[Gemini] All models exhausted.");
-  throw new Error(GEMINI_BUSY_MESSAGE);
+  // Every key and model combination failed.
+  console.error("[Gemini] All API keys and models exhausted.");
+  throw new Error(GEMINI_QUOTA_MESSAGE);
 }

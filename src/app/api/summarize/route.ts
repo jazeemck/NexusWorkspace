@@ -4,7 +4,7 @@ import { isValidYouTubeUrl, extractVideoId, getThumbnailUrl } from "@/lib/utils"
 import { YoutubeTranscript } from 'youtube-transcript';
 import { authOptions } from "@/lib/auth";
 import { getServerSession } from "next-auth/next";
-import { callGemini, GEMINI_BUSY_MESSAGE } from "@/lib/gemini";
+import { callGemini, GEMINI_BUSY_MESSAGE, GEMINI_QUOTA_MESSAGE } from "@/lib/gemini";
 
 interface FirecrawlResponse {
   success: boolean;
@@ -276,6 +276,13 @@ export async function POST(req: NextRequest) {
       console.error("[Summarize] Gemini Analysis Critical Failure:", aiErr);
 
       const errorMessage = aiErr.message || String(aiErr);
+
+      if (errorMessage === GEMINI_QUOTA_MESSAGE) {
+        return NextResponse.json({
+          error: "Free AI quota reached. Please try again tomorrow or contact support.",
+          code: "QUOTA_EXHAUSTED"
+        }, { status: 429 });
+      }
 
       const isBusy =
         errorMessage === GEMINI_BUSY_MESSAGE ||

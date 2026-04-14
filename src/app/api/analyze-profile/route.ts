@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { callGemini, GEMINI_BUSY_MESSAGE } from "@/lib/gemini";
+import { callGemini, GEMINI_BUSY_MESSAGE, GEMINI_QUOTA_MESSAGE } from "@/lib/gemini";
 
 export async function POST(req: NextRequest) {
   try {
@@ -66,6 +66,13 @@ export async function POST(req: NextRequest) {
 
   } catch (error: any) {
     console.error("[JobSearch] CRITICAL FAILURE:", error);
+
+    if (error.message === GEMINI_QUOTA_MESSAGE) {
+      return NextResponse.json(
+        { error: "Free AI quota reached. Please try again tomorrow or contact support." },
+        { status: 429 }
+      );
+    }
 
     const isBusy =
       error.message === GEMINI_BUSY_MESSAGE ||
