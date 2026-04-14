@@ -14,6 +14,9 @@
  * functions (Vercel, etc.) have strict execution time limits and sleeping
  * for 5-30 s will cause request timeouts.  Client-side retry (e.g. toast +
  * "try again" button) is the correct pattern for rate-limit recovery.
+ *
+ * Model chain: gemini-2.0-flash → gemini-1.5-flash
+ * (gemini-1.5-flash-8b was removed — it returns 404 on v1beta endpoint)
  */
 
 export const GEMINI_BUSY_MESSAGE =
@@ -58,7 +61,9 @@ function recordRateLimit(modelId: string) {
 
 // ---------- default model chain --------------------------------------------
 
-const DEFAULT_MODEL_CHAIN = ["gemini-2.0-flash", "gemini-1.5-flash-8b"];
+// gemini-1.5-flash-8b is NOT available on the v1beta endpoint (returns 404).
+// gemini-1.5-flash IS available and serves as the safe fallback.
+const DEFAULT_MODEL_CHAIN = ["gemini-2.0-flash", "gemini-1.5-flash"];
 const RETRYABLE_STATUSES = new Set([429, 503]);
 
 // ---------- main exported function -----------------------------------------
