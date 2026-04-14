@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
 
       // ── Phase 2: Elite Intelligence Discovery (Synchronized with Radar) ──────────
       // Based on Radar Tape: your elite account uses 'gemini-2.5-flash' and 'gemini-2.0-flash'.
-      const potentialModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+      const potentialModels = ["gemini-2.0-flash"];
       let finalResult = "";
       let lastErr: any;
 

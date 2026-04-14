@@ -96,7 +96,7 @@ async function analyzeWithGemini(
   category: string,
   durationSeconds: number | null
 ): Promise<GeminiResult> {
-  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+  const models = ["gemini-2.0-flash"];
   const durationText = durationSeconds ? formatDuration(durationSeconds) : "Unknown";
   const apiKey = process.env.GEMINI_API_KEY;
   let lastError: any;
