@@ -95,6 +95,7 @@ export default function Navbar({ user = null }: NavbarProps) {
             <div className="relative">
               <button 
                 onClick={() => setShowDropdown(!showDropdown)}
+                suppressHydrationWarning
                 className="flex items-center gap-3 px-3 py-1.5 rounded-xl border border-border bg-muted/20 hover:bg-muted/40 transition-all group"
               >
                 {activeUser.image ? (

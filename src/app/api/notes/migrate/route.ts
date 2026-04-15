@@ -14,9 +14,12 @@ export async function POST(req: NextRequest) {
       user_id: userId,
       title: n.title,
       content: n.content, // This is Tiptap JSON
-      type: "note",
-      status: "published",
-      folder_id: null, // We could map folders if we had a folder table, or just use folder name string if it was supported
+      is_favorite: n.favorite || n.is_favorite || false, // ✅ FIX: Map correct fields
+      is_pinned: n.pinned || n.is_pinned || false,
+      folder_id: n.folder || n.folder_id || "General",
+      last_edited_at: n.updatedAt || n.last_edited_at || new Date().toISOString(),
+      created_at: n.createdAt || n.created_at || new Date().toISOString(),
+      updated_at: n.updatedAt || n.updated_at || new Date().toISOString(),
     }));
 
     const { data, error } = await supabase

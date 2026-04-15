@@ -49,10 +49,17 @@ export default function JobSearchClient({ user }: { user: { id: string; email?: 
   const [profileText, setProfileText] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const [quotaError, setQuotaError] = useState<string | null>(null);
   
   const [selectedJobForAI, setSelectedJobForAI] = useState<Job | null>(null);
   const [aiCoverLetter, setAiCoverLetter] = useState("");
   const [isGeneratingCL, setIsGeneratingCL] = useState(false);
+
+  // Fix 1: Clear stale error state on mount
+  useEffect(() => {
+    setQuotaError(null);
+    localStorage.removeItem("quota_error");
+  }, []);
 
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -95,6 +102,7 @@ export default function JobSearchClient({ user }: { user: { id: string; email?: 
       toast.error("Please provide a resume or profile text");
       return;
     }
+    setQuotaError(null); // Reset on each attempt
     setIsAnalyzing(true);
     const loadingToast = toast.loading(file ? `Analyzing ${file.name}...` : "Analyzing profile...");
     try {
@@ -111,13 +119,25 @@ export default function JobSearchClient({ user }: { user: { id: string; email?: 
       const contentType = res.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) {
         const text = await res.text();
-        console.error("Server returned non-JSON response:", text);
-        throw new Error("Server error: Intelligence node returned an invalid response. Please try again.");
+        console.error("[JobSearch] Server returned non-JSON response:", text);
+        
+        // Provide better feedback if it's a known error page or too long
+        const snippet = text.length > 200 ? text.substring(0, 200) + "..." : text;
+        throw new Error(`Server connection error: Intelligence node returned an invalid response. (Type: ${contentType}) Details: ${snippet}`);
       }
 
       const data = await res.json();
+
       if (!res.ok) {
-        throw new Error(data.details || data.error || "Upload or analysis failed");
+        const message = data.details || data.error || "Upload or analysis failed";
+
+        // ✅ Detect quota errors specifically and handle gracefully
+        if (res.status === 429 || message.toLowerCase().includes("quota")) {
+          setQuotaError(message); // Show in UI — not a crash
+          return;
+        }
+
+        throw new Error(message); // Other errors can still throw
       }
       
       let skills: string[] = [];
@@ -188,20 +208,49 @@ export default function JobSearchClient({ user }: { user: { id: string; email?: 
         }
 
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Synthesis failed");
+        // ✅ FIX - Catch quota error directly from response
+        if (!res.ok) {
+          const message = data.error || data.details || "Synthesis failed";
+          if (res.status === 429 || message.toLowerCase().includes("quota")) {
+            setQuotaError(message);      // show the yellow banner
+            setSelectedJobForAI(null);   // close the modal
+            toast.dismiss(loadToast);
+            return;
+          }
+          throw new Error(message);
+        }
         
-        const parsed = typeof data.result === "string" ? JSON.parse(data.result.replace(/```json\s*|```/g, "").trim()) : data.result;
-        setAiCoverLetter(parsed.coverLetter);
+        // ✅ FIX - improved parsing
+        let coverLetter = "";
+        try {
+          const raw = data.result;
+          const parsed = typeof raw === "string"
+            ? JSON.parse(raw.replace(/```json\s*|```/g, "").trim())
+            : raw;
+          coverLetter = typeof parsed === "string"
+            ? parsed
+            : (parsed?.coverLetter || parsed?.content || JSON.stringify(parsed));
+        } catch {
+          coverLetter = typeof data.result === "string"
+            ? data.result
+            : "Unable to parse response.";
+        }
+        setAiCoverLetter(coverLetter);
         toast.success("AI Synthesis Complete", { id: loadToast });
     } catch (err) {
         console.error(err);
+        // ✅ FIX - catch block quota parsing
         const errMsg = (err as any)?.message || "";
-        const isQuota = errMsg.toLowerCase().includes("quota reached") ||
+        const isQuota = errMsg.toLowerCase().includes("quota") ||
                         errMsg.toLowerCase().includes("try again tomorrow");
+        if (isQuota) {
+          setQuotaError(errMsg);
+          setSelectedJobForAI(null); // close modal, show banner instead
+        }
         toast.error(
           isQuota
-            ? "Free AI quota reached. Please try again tomorrow or contact support."
-            : "AI Synthesis temporarily unavailable. Please try again.",
+            ? "Free AI quota reached. Please try again tomorrow."
+            : "AI Synthesis temporarily unavailable.",
           { id: loadToast }
         );
     } finally {
@@ -229,6 +278,18 @@ export default function JobSearchClient({ user }: { user: { id: string; email?: 
 
       {/* Advanced Search Bar */}
       <section className="mb-20">
+        {/* ✅ FIX - dismissable quota banner */}
+        {quotaError && (
+          <div className="mb-6 rounded-md bg-yellow-50 border border-yellow-300 p-4 text-yellow-800 text-sm flex items-center justify-between">
+            <span>⚠️ {quotaError}</span>
+            <button
+              onClick={() => setQuotaError(null)}
+              className="ml-4 text-yellow-600 hover:text-yellow-900 font-bold transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         <div className="bg-card border border-border/50 rounded-[3rem] p-4 shadow-2xl relative overflow-hidden group focus-within:border-foreground/10 transition-all">
           <form onSubmit={handleSearch} className="flex flex-col md:flex-row items-center gap-4 relative z-10">
             <div className="flex-1 flex items-center px-4 w-full">
@@ -285,12 +346,15 @@ export default function JobSearchClient({ user }: { user: { id: string; email?: 
                 type="file" 
                 accept=".txt,.pdf,.docx" 
                 disabled={isAnalyzing}
-                onChange={(e) => { 
-                  const f = e.target.files?.[0]; 
-                  if (f) handleAnalyzeProfile(f); 
-                  // Reset input value so the same file can be uploaded again if needed
+                // ✅ FIX - clear quota before attempt, give feedback
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) {
+                    setQuotaError(null); // clear stale quota before fresh attempt
+                    handleAnalyzeProfile(f);
+                  }
                   e.target.value = '';
-                }} 
+                }}
                 className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed" 
               />
             </div>
@@ -312,8 +376,14 @@ export default function JobSearchClient({ user }: { user: { id: string; email?: 
                 <Filter className="w-4 h-4" /> Refine Stream
               </button>
             </div>
+            {/* ✅ FIX - pass quota disabled state into each JobCard */}
             {jobs.map((job) => (
-              <JobCard key={job.id} job={job} onGenerateCL={() => generateCoverLetter(job)} />
+              <JobCard 
+                key={job.id} 
+                job={job} 
+                onGenerateCL={() => generateCoverLetter(job)}
+                quotaDisabled={!!quotaError}
+              />
             ))}
           </div>
         ) : (
@@ -466,7 +536,12 @@ export default function JobSearchClient({ user }: { user: { id: string; email?: 
   );
 }
 
-function JobCard({ job, onGenerateCL }: { job: Job, onGenerateCL: () => void }) {
+// ✅ FIX - add quotaDisabled prop
+function JobCard({ job, onGenerateCL, quotaDisabled }: { 
+  job: Job, 
+  onGenerateCL: () => void,
+  quotaDisabled: boolean
+}) {
   return (
     <motion.div 
       whileHover={{ y: -5 }}
@@ -533,11 +608,14 @@ function JobCard({ job, onGenerateCL }: { job: Job, onGenerateCL: () => void }) 
         >
           APPLY DIRECTLY <ExternalLink className="w-4 h-4" />
         </a>
+        {/* ✅ FIX - disable button when quota is hit */}
         <button 
           onClick={(e) => { e.stopPropagation(); onGenerateCL(); }}
-          className="flex items-center justify-center gap-3 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/30 hover:text-black transition-all group/sc"
+          disabled={quotaDisabled}
+          className="flex items-center justify-center gap-3 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/30 hover:text-black transition-all group/sc disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-muted-foreground/30"
         >
-          <Sparkles className="w-4 h-4 opacity-0 group-hover/sc:opacity-100 transition-opacity" /> AI Synthesis
+          <Sparkles className="w-4 h-4 opacity-0 group-hover/sc:opacity-100 transition-opacity" /> 
+          {quotaDisabled ? "Quota Reached" : "AI Synthesis"}
         </button>
       </div>
     </motion.div>

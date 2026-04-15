@@ -4,7 +4,8 @@ import { isValidYouTubeUrl, extractVideoId, getThumbnailUrl } from "@/lib/utils"
 import { YoutubeTranscript } from 'youtube-transcript';
 import { authOptions } from "@/lib/auth";
 import { getServerSession } from "next-auth/next";
-import { callGemini, GEMINI_BUSY_MESSAGE, GEMINI_QUOTA_MESSAGE } from "@/lib/gemini";
+import { GEMINI_BUSY_MESSAGE, GEMINI_QUOTA_MESSAGE } from "@/lib/gemini";
+import { callAI } from "@/lib/ai-universal";
 
 interface FirecrawlResponse {
   success: boolean;
@@ -114,7 +115,8 @@ async function analyzeWithGemini(
 
   const prompt = `TITLE: ${videoTitle}\nDURATION: ${durationText}\nCATEGORY: ${category}\n\nTRANSCRIPT:\n${content}\n\n${assignment}`;
 
-  const { text } = await callGemini({ parts: [{ text: prompt }] });
+  console.log(`[Summarizer] Calling Universal AI Engine (Provider Fallback Active)...`);
+  const { text } = await callAI({ parts: [{ text: prompt }] });
 
   let sanitized = text.trim();
   const jsonMatch = sanitized.match(/\[\s*\{[\s\S]*\}\s*\]|\{\s*"[\s\S]*":[\s\S]*\}/);
@@ -277,9 +279,9 @@ export async function POST(req: NextRequest) {
 
       const errorMessage = aiErr.message || String(aiErr);
 
-      if (errorMessage === GEMINI_QUOTA_MESSAGE) {
+      if (errorMessage === GEMINI_QUOTA_MESSAGE || errorMessage.includes("quota")) {
         return NextResponse.json({
-          error: "Free AI quota reached. Please try again tomorrow or contact support.",
+          error: "AI quota reached for all providers. Please try again tomorrow.",
           code: "QUOTA_EXHAUSTED"
         }, { status: 429 });
       }

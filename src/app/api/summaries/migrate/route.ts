@@ -13,12 +13,15 @@ export async function POST(req: NextRequest) {
     const summariesToInsert = summaries.map((s: any) => ({
       user_id: userId,
       youtube_url: s.youtube_url,
-      video_title: s.video_title,
+      video_title: s.video_title || "Migrated Video",
       thumbnail_url: s.thumbnail_url,
-      tldr: s.tldr,
-      key_takeaways: s.key_takeaways,
-      raw_content: s.raw_content,
-      content_source: s.content_source || "transcript",
+      tldr: s.tldr || s.intelligent_summary, // ✅ FIX: Use 'tldr' instead of 'intelligent_summary'
+      key_takeaways: s.key_takeaways || s.timeline_summary || [], // ✅ FIX: Use 'key_takeaways'
+      raw_content: s.raw_content || s.raw_transcript || "", // ✅ FIX: Use 'raw_content'
+      sentiment: s.sentiment || "",
+      sentiment_score: s.sentiment_score || 0,
+      action_items: s.action_items || [],
+      content_source: "migration",
       created_at: s.createdAt || new Date().toISOString(),
     }));
 
