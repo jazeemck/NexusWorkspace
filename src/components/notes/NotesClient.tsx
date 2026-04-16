@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Plus, Search, Filter, Grid, List as ListIcon, Cloud, Star, FileText, Folder as FolderIcon, Tag as TagIcon, LayoutGrid } from "lucide-react";
+import { Plus, Search, Filter, Grid, List as ListIcon, Cloud, Star, FileText, Folder as FolderIcon, Tag as TagIcon, LayoutGrid, Loader2, AlertCircle, RefreshCcw } from "lucide-react";
 import NoteList from "./NoteList";
 import NoteNavigation from "./NoteNavigation";
 import NoteEditor from "./NoteEditor";
 import toast from "react-hot-toast";
 import { X } from "lucide-react";
+import mammoth from 'mammoth';
 
 import { useSession } from "next-auth/react";
 
@@ -48,6 +49,132 @@ export default function NotesClient({ initialUser }: { initialUser: any }) {
     const [selectedDetail, setSelectedDetail] = useState<string | null>(null); // for specific folder or tag
     const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'alpha' | 'edited'>('edited');
     const [showFilterPanel, setShowFilterPanel] = useState(false);
+    const [isExtracting, setIsExtracting] = useState(false);
+    const [extractionError, setExtractionError] = useState(false);
+
+    // Document Extractors (Client-Side)
+    const extractTxt = async (file: File): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target?.result as string);
+            reader.onerror = reject;
+            reader.readAsText(file);
+        });
+    };
+
+    const extractDocx = async (file: File): Promise<string> => {
+        const mammoth = (await import('mammoth')).default;
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        return result.value;
+    };
+
+    const loadPDF = async (file: File): Promise<string> => {
+        const pdfjsLib = await import('pdfjs-dist');
+        // @ts-ignore
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+        
+        const arrayBuffer = await file.arrayBuffer();
+        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        const pdf = await loadingTask.promise;
+        let fullText = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            // @ts-ignore
+            const pageText = textContent.items.map((item: any) => item.str).join(' ');
+            fullText += pageText + '\n\n';
+        }
+        return fullText;
+    };
+
+    const handleDocumentUpload = async (file: File) => {
+        setIsExtracting(true);
+        setExtractionError(false);
+        const loadingToast = toast.loading(`Ingesting ${file.name}...`);
+        
+        try {
+            let content = "";
+            const ext = file.name.split('.').pop()?.toLowerCase();
+            
+            if (ext === 'pdf') {
+                content = await loadPDF(file);
+            } else if (ext === 'docx') {
+                content = await extractDocx(file);
+            } else if (ext === 'txt' || ext === 'js' || ext === 'ts' || ext === 'tsx' || ext === 'json') {
+                content = await extractTxt(file);
+            } else {
+                throw new Error('Unsupported format');
+            }
+
+            if (!content || content.trim().length === 0) {
+                throw new Error('Empty document');
+            }
+
+            const now = new Date().toISOString();
+            const title = file.name.replace(/\.[^/.]+$/, '').toUpperCase();
+            
+            // Format text into Tiptap paragraphs
+            const tiptapContent = content.split(/\n+/).filter(Boolean).map(line => ({
+                type: "paragraph",
+                content: [{ type: "text", text: line }]
+            }));
+
+            const newNote: Note = {
+                id: crypto.randomUUID(),
+                title: title,
+                body: content.slice(0, 500),
+                content: {
+                    type: "doc",
+                    content: [
+                        { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: `Imported Asset: ${title}` }] },
+                        ...tiptapContent
+                    ]
+                },
+                folder: "Imported",
+                tags: ["imported", ext],
+                favorite: false,
+                pinned: false,
+                createdAt: now,
+                updatedAt: now,
+            };
+
+            const savedNote = session?.user ? await fetch("/api/notes", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(newNote),
+            }).then(r => r.ok ? r.json() : null) : newNote;
+
+            if (savedNote) {
+                const normalized = {
+                    ...newNote,
+                    ...savedNote,
+                    createdAt: savedNote.createdAt || savedNote.created_at || now,
+                    updatedAt: savedNote.updatedAt || savedNote.updated_at || now,
+                    folder: savedNote.folder || newNote.folder
+                };
+                
+                setData(prev => ({ 
+                    ...prev, 
+                    notes: [normalized, ...prev.notes],
+                    folders: prev.folders.includes("Imported") ? prev.folders : [...prev.folders, "Imported"]
+                }));
+                
+                setSelectedNoteId(normalized.id);
+                setFilterType('folders');
+                setSelectedDetail('Imported');
+                toast.success("Intelligence secured.", { id: loadingToast });
+            } else {
+                throw new Error("Cloud sync failure");
+            }
+        } catch (err) {
+            console.error("Extraction failed:", err);
+            setExtractionError(true);
+            toast.error("Deep extraction failed.", { id: loadingToast });
+        } finally {
+            setIsExtracting(false);
+        }
+    };
 
     // Initial Load
     useEffect(() => {
@@ -291,19 +418,58 @@ export default function NotesClient({ initialUser }: { initialUser: any }) {
 
     if (!isMounted) return null;
 
+    if (isExtracting) {
+        return (
+            <div className="min-h-screen bg-white flex flex-col items-center justify-center p-8 animate-in fade-in duration-500">
+                <div className="w-16 h-16 border-4 border-muted-foreground/10 border-t-foreground rounded-full animate-spin mb-8" />
+                <h2 className="text-2xl font-black uppercase tracking-[0.2em] mb-2">Reading document...</h2>
+                <p className="text-muted-foreground font-medium uppercase tracking-[0.1em] text-[10px]">Nexus is distilling structural intelligence from your asset.</p>
+            </div>
+        );
+    }
+
+    if (extractionError) {
+        return (
+            <div className="min-h-screen bg-white flex flex-col items-center justify-center p-8 text-center animate-in zoom-in-95 duration-500">
+                <div className="p-6 bg-destructive/10 rounded-full mb-8">
+                    <AlertCircle className="w-12 h-12 text-destructive" />
+                </div>
+                <h2 className="text-3xl font-black uppercase tracking-tight mb-4 text-black">We couldn't extract content from this file.</h2>
+                <p className="text-muted-foreground max-w-md mb-12 font-medium">Try uploading a .txt version or paste your content directly. Some binary formats may have restricted access.</p>
+                <div className="flex items-center gap-4">
+                    <button 
+                        onClick={() => { setExtractionError(false); document.getElementById('file-upload')?.click(); }}
+                        className="bg-foreground text-background px-10 py-5 rounded-3xl font-black uppercase tracking-widest text-xs flex items-center gap-4 hover:scale-105 transition-all shadow-2xl"
+                    >
+                        <RefreshCcw className="w-5 h-5" /> Try Again
+                    </button>
+                    <button 
+                        onClick={() => setExtractionError(false)}
+                        className="px-10 py-5 border border-border rounded-3xl font-black uppercase tracking-widest text-xs hover:bg-muted transition-all"
+                    >
+                        Go Back
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     if (isCreating || activeNote) {
         return (
-            <NoteEditor 
-                note={activeNote}
-                folders={data.folders}
-                onSave={handleSaveNote}
-                onCancel={() => { setIsCreating(false); setSelectedNoteId(null); }}
-            />
+            <div className="min-h-screen bg-white">
+                <NoteEditor 
+                    key={activeNote?.id || "new-asset"}
+                    note={activeNote}
+                    folders={data.folders}
+                    onSave={handleSaveNote}
+                    onCancel={() => { setIsCreating(false); setSelectedNoteId(null); }}
+                />
+            </div>
         );
     }
 
     return (
-        <div className="flex h-[calc(100vh-64px)] overflow-hidden bg-background flex-col relative">
+        <div className="flex min-h-screen bg-background flex-col relative">
             <main className="flex-1 flex flex-col min-w-0 pb-24">
                 <div className="p-8 pb-4">
                     <div className="flex items-center justify-between mb-8">
@@ -318,13 +484,34 @@ export default function NotesClient({ initialUser }: { initialUser: any }) {
                                  filterType === 'tags' ? `Tag: #${selectedDetail}` : 'Cloud Notes'}
                             </h1>
                         </div>
-                        <button 
-                            suppressHydrationWarning
-                            onClick={handleCreateNote}
-                            className="bg-foreground text-background px-6 py-3 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center gap-3 hover:scale-105 transition-all shadow-2xl"
-                        >
-                            <Plus className="w-4 h-4" /> New Note
-                        </button>
+                        <div className="flex items-center gap-4">
+                            <input 
+                                type="file" 
+                                id="file-upload" 
+                                className="hidden" 
+                                accept=".pdf,.txt,.docx,.js,.ts,.tsx,.json" 
+                                onChange={(e) => {
+                                    const files = e.target.files;
+                                    if (!files || files.length === 0) return;
+                                    handleDocumentUpload(files[0]);
+                                    e.target.value = ""; // Reset
+                                }}
+                            />
+                            <button 
+                                onClick={() => document.getElementById('file-upload')?.click()}
+                                className="border border-border text-foreground px-6 py-3 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center gap-3 hover:bg-card transition-all"
+                            >
+                                <FileText className="w-4 h-4" /> Upload Asset
+                            </button>
+
+                            <button 
+                                suppressHydrationWarning
+                                onClick={handleCreateNote}
+                                className="bg-foreground text-background px-6 py-3 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center gap-3 hover:scale-105 transition-all shadow-2xl"
+                            >
+                                <Plus className="w-4 h-4" /> New Note
+                            </button>
+                        </div>
                     </div>
 
                     <div className="flex items-center gap-4 mb-4">
@@ -409,7 +596,7 @@ export default function NotesClient({ initialUser }: { initialUser: any }) {
                     </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-8 pt-0">
+                <div className="p-8 pt-0">
                     {loading ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             {[1, 2, 3].map(i => (

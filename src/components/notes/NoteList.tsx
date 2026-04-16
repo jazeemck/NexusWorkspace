@@ -95,9 +95,11 @@ export default function NoteList({
                     <span className="text-[8px] font-black text-muted-foreground/10 uppercase tracking-widest">Added: {formatDate(note.createdAt || note.updatedAt)}</span>
                     <span className="text-[8px] font-black text-muted-foreground/30 uppercase tracking-widest">Edited: {formatDate(note.updatedAt)}</span>
                 </div>
-                <div className="relative group/menu">
-                    <MoreVertical className="w-4 h-4 text-muted-foreground/20 group-hover:text-foreground transition-all" />
-                    <div className="absolute right-0 bottom-full mb-2 w-48 bg-card border border-border rounded-[1.5rem] shadow-2xl z-50 p-2 opacity-0 group-hover/menu:opacity-100 pointer-events-none group-hover/menu:pointer-events-auto transition-all translate-y-2 group-hover/menu:translate-y-0 scale-95 group-hover/menu:scale-100">
+                <div className="relative group/menu py-2 px-2 -mr-2">
+                    <MoreVertical className="w-4 h-4 text-muted-foreground/20 group-hover:text-foreground transition-all cursor-pointer" />
+                    <div className="absolute right-0 bottom-[80%] w-48 bg-card border border-border rounded-[1.5rem] shadow-2xl z-50 p-2 opacity-0 group-hover/menu:opacity-100 pointer-events-none group-hover/menu:pointer-events-auto transition-all translate-y-2 group-hover/menu:translate-y-0 scale-95 group-hover/menu:scale-100">
+                        {/* Invisible bridge to prevent gap */}
+                        <div className="absolute top-full left-0 right-0 h-8 -z-10" />
                         <button onClick={(e) => { e.stopPropagation(); onDuplicate(note.id); }} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-[10px] font-black uppercase tracking-widest transition-all"><Copy className="w-4 h-4" /> Duplicate</button>
                         
                         {/* Move sub-menu */}
@@ -160,7 +162,8 @@ export default function NoteList({
                             </button>
                             <div className="relative group/menu">
                                 <MoreVertical className="w-5 h-5 transition-all hover:text-foreground" />
-                                <div className="absolute right-0 top-full mt-2 w-48 bg-card border border-border rounded-xl shadow-2xl z-50 p-1 opacity-0 group-hover/menu:opacity-100 pointer-events-none group-hover/menu:pointer-events-auto transition-all">
+                                <div className="absolute right-0 top-[80%] w-48 bg-card border border-border rounded-xl shadow-2xl z-50 p-1 opacity-0 group-hover/menu:opacity-100 pointer-events-none group-hover/menu:pointer-events-auto transition-all translate-y-[-10px] group-hover/menu:translate-y-0">
+                                    <div className="absolute bottom-full left-0 right-0 h-8 -z-10" />
                                     <button onClick={(e) => { e.stopPropagation(); onDuplicate(note.id); }} className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-muted text-[10px] font-black uppercase tracking-widest"><Copy className="w-3.5 h-3.5" /> Duplicate</button>
                                     <button onClick={(e) => { e.stopPropagation(); onDeleteNote(note.id); }} className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-destructive/10 text-destructive text-[10px] font-black uppercase tracking-widest"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
                                 </div>

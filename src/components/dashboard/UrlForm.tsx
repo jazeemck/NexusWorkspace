@@ -23,15 +23,28 @@ export default function UrlForm() {
 
   // Load history from guest_data or session history
   useState(() => {
-    if (typeof window !== 'undefined') {
-        const guestDataRaw = localStorage.getItem("guest_data");
-        if (guestDataRaw) {
+    const loadRecent = async () => {
+        if (typeof window === 'undefined') return;
+
+        if (session) {
             try {
-                const guestData = JSON.parse(guestDataRaw);
-                setRecentHistory(guestData.summaries?.map((s: any) => s.youtube_url).slice(0, 5) || []);
+                const res = await fetch("/api/history");
+                if (res.ok) {
+                    const data = await res.json();
+                    setRecentHistory(data.summaries?.map((s: any) => s.youtube_url).slice(0, 5) || []);
+                }
             } catch (e) {}
+        } else {
+            const guestDataRaw = localStorage.getItem("guest_data");
+            if (guestDataRaw) {
+                try {
+                    const guestData = JSON.parse(guestDataRaw);
+                    setRecentHistory(guestData.summaries?.map((s: any) => s.youtube_url).slice(0, 5) || []);
+                } catch (e) {}
+            }
         }
-    }
+    };
+    loadRecent();
   });
 
   const handleSubmit = async (e: React.FormEvent) => {

@@ -124,24 +124,24 @@ export default function LandingClient({ session }: { session: Session | null }) 
           
           <div className="grid md:grid-cols-3 gap-8">
             <div className="group bg-card border border-border rounded-3xl p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-              <div className="w-12 h-12 bg-muted rounded-xl flex items-center justify-center mb-6 group-hover:bg-foreground/10 transition-colors duration-300">
-                 <Youtube className="w-6 h-6 text-muted-foreground group-hover:text-foreground transition-colors duration-300" />
+              <div className="w-12 h-12 bg-muted rounded-xl flex items-center justify-center mb-6 group-hover:bg-red-500/10 transition-colors duration-300">
+                 <Youtube className="w-6 h-6 text-muted-foreground group-hover:text-red-500 transition-colors duration-300 drop-shadow-[0_0_8px_rgba(239,68,68,0)] group-hover:drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]" />
               </div>
               <h3 className="text-xl font-bold mb-3">Instant Summaries</h3>
               <p className="text-muted-foreground text-sm">Drop any YouTube link and instantly receive a structured, timestamped breakdown of the core concepts.</p>
             </div>
             
             <div className="group bg-card border border-border rounded-3xl p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-              <div className="w-12 h-12 bg-muted rounded-xl flex items-center justify-center mb-6 group-hover:bg-foreground/10 transition-colors duration-300">
-                 <Sparkles className="w-6 h-6 text-muted-foreground group-hover:text-foreground transition-colors duration-300" />
+              <div className="w-12 h-12 bg-muted rounded-xl flex items-center justify-center mb-6 group-hover:bg-blue-500/10 transition-colors duration-300">
+                 <Sparkles className="w-6 h-6 text-muted-foreground group-hover:text-blue-500 transition-colors duration-300 drop-shadow-[0_0_8px_rgba(59,130,246,0)] group-hover:drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
               </div>
               <h3 className="text-xl font-bold mb-3">AI Intelligence</h3>
               <p className="text-muted-foreground text-sm">Chat directly with the AI about your videos or documents to extract nuances and clarify complex topics.</p>
             </div>
             
             <div className="group bg-card border border-border rounded-3xl p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-              <div className="w-12 h-12 bg-muted rounded-xl flex items-center justify-center mb-6 group-hover:bg-foreground/10 transition-colors duration-300">
-                 <Zap className="w-6 h-6 text-muted-foreground group-hover:text-foreground transition-colors duration-300" />
+              <div className="w-12 h-12 bg-muted rounded-xl flex items-center justify-center mb-6 group-hover:bg-amber-500/10 transition-colors duration-300">
+                 <Zap className="w-6 h-6 text-muted-foreground group-hover:text-amber-500 transition-colors duration-300 drop-shadow-[0_0_8px_rgba(245,158,11,0)] group-hover:drop-shadow-[0_0_8px_rgba(245,158,11,0.5)]" />
               </div>
               <h3 className="text-xl font-bold mb-3">Cloud Notes</h3>
               <p className="text-muted-foreground text-sm">Save your insights into beautifully formatted cloud notes that sync instantly across all your devices.</p>
@@ -156,9 +156,15 @@ export default function LandingClient({ session }: { session: Session | null }) 
         <div className="max-w-4xl mx-auto px-6 text-center relative z-10">
           <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-6">Ready to upgrade your workflow?</h2>
           <p className="text-lg text-muted-foreground mb-10 max-w-xl mx-auto">Join thousands of researchers, students, and professionals who trust Nexus Workspace.</p>
-          <Button onClick={() => setShowSignUpModal(true)} size="lg" className="rounded-xl px-12 h-16 btn-primary">
-             Create Your Free Account
-          </Button>
+          {session ? (
+            <Button onClick={() => router.push('/dashboard')} size="lg" className="rounded-xl px-12 h-16 btn-primary group">
+               Access Executive Workspace <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-2 transition-transform" />
+            </Button>
+          ) : (
+            <Button onClick={() => setShowSignUpModal(true)} size="lg" className="rounded-xl px-12 h-16 btn-primary">
+               Create Your Free Account
+            </Button>
+          )}
         </div>
       </section>
 

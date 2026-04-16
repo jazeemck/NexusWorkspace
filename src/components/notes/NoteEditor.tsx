@@ -90,6 +90,17 @@ export default function NoteEditor({ note, folders, onSave, onCancel }: NoteEdit
         return () => window.removeEventListener("mousedown", handleClick);
     }, []);
 
+    // Content synchronization backup
+    useEffect(() => {
+        if (editor && note?.content) {
+            const currentContent = JSON.stringify(editor.getJSON());
+            const newContent = JSON.stringify(note.content);
+            if (currentContent !== newContent) {
+                editor.commands.setContent(note.content);
+            }
+        }
+    }, [editor, note?.content]);
+
     // Auto-save logic
     useEffect(() => {
         if (!editor) return;
@@ -130,7 +141,7 @@ export default function NoteEditor({ note, folders, onSave, onCancel }: NoteEdit
     const handleDownloadPdf = async () => {
         if (!editorContainerRef.current) return;
         setShowDownloadMenu(false);
-        const loadingToast = toast.loading("Synthesizing PDF Asset...");
+        const loadingToast = toast.loading("Synthesizing Executive PDF...");
         try {
             const element = editorContainerRef.current;
             
@@ -140,11 +151,15 @@ export default function NoteEditor({ note, folders, onSave, onCancel }: NoteEdit
             clone.style.position = 'absolute';
             clone.style.left = '-9999px';
             clone.style.top = '0';
-            clone.style.width = `${element.offsetWidth}px`;
+            clone.style.width = '700px';
             clone.style.height = 'auto';
             document.body.appendChild(clone);
 
-            // 2. Walk elements and overwrite any lab()/oklch() styles
+            // Remove the title/input section from clone so we can draw it better manually in jsPDF
+            const metaSection = clone.querySelector('.mb-16');
+            if (metaSection) metaSection.remove();
+
+            // Overwrite any lab()/oklch() styles to safe colors
             const allElements = [clone, ...Array.from(clone.querySelectorAll('*'))];
             allElements.forEach(child => {
                 const el = child as HTMLElement;
@@ -157,30 +172,12 @@ export default function NoteEditor({ note, folders, onSave, onCancel }: NoteEdit
                 });
             });
 
-            // 3. Inject global style overrides to ensure safety
-            const styleTag = document.createElement('style');
-            styleTag.innerHTML = `
-                #pdf-clone-doc * {
-                    color: inherit !important;
-                }
-                #pdf-clone-doc [style*="lab("],
-                #pdf-clone-doc [style*="lch("],
-                #pdf-clone-doc [style*="oklch("],
-                #pdf-clone-doc [style*="oklab("] {
-                    color: #000000 !important;
-                    background-color: #ffffff !important;
-                }
-            `;
-            clone.appendChild(styleTag);
-
-            // 4. Run html2canvas on the safe clone
             const canvas = await html2canvas(clone, {
                 scale: 2,
                 useCORS: true,
                 backgroundColor: "#ffffff",
             });
 
-            // 5. Cleanup the DOM
             document.body.removeChild(clone);
 
             const imgData = canvas.toDataURL('image/png', 1.0);
@@ -188,27 +185,43 @@ export default function NoteEditor({ note, folders, onSave, onCancel }: NoteEdit
             const pageWidth = pdf.internal.pageSize.getWidth();
             const pageHeight = pdf.internal.pageSize.getHeight();
             
-            const imgWidth = pageWidth - 20;
+            // Headers & Metadata (Manual drawing for perfection)
+            pdf.setFontSize(32);
+            pdf.setFont("helvetica", "bold");
+            pdf.text(title.toUpperCase() || "UNTITLED ASSET", 20, 35);
+            
+            pdf.setDrawColor(240, 240, 240);
+            pdf.line(20, 45, 190, 45);
+            
+            pdf.setFontSize(8);
+            pdf.setFont("helvetica", "bold");
+            pdf.setTextColor(150, 150, 150);
+            pdf.text(`FOLDER: ${folder.toUpperCase()}`, 20, 55);
+            pdf.text(`TAGS: ${tagsInput.toUpperCase() || "NONE"}`, 20, 60);
+            pdf.text(`SECURED: ${new Date().toLocaleDateString()}`, 190, 55, { align: 'right' });
+
+            // Body content from canvas
+            const imgWidth = pageWidth - 40;
             const imgHeight = (canvas.height * imgWidth) / canvas.width;
             
             let heightLeft = imgHeight;
-            let position = 10;
+            let position = 80;
 
-            pdf.addImage(imgData, 'PNG', 10, position, imgWidth, imgHeight);
-            heightLeft -= (pageHeight - 20);
+            pdf.addImage(imgData, 'PNG', 20, position, imgWidth, imgHeight);
+            heightLeft -= (pageHeight - 80);
 
             while (heightLeft > 0) {
-                position = heightLeft - imgHeight + 10;
                 pdf.addPage();
-                pdf.addImage(imgData, 'PNG', 10, position, imgWidth, imgHeight);
-                heightLeft -= (pageHeight - 20);
+                position = 20; 
+                pdf.addImage(imgData, 'PNG', 20, position - (imgHeight - heightLeft), imgWidth, imgHeight);
+                heightLeft -= pageHeight;
             }
 
             pdf.save(`${title.replace(/\s+/g, '_') || 'Asset'}.pdf`);
             toast.success("Intelligence PDF Secured", { id: loadingToast });
         } catch (err) {
             console.error("PDF Export Error:", err);
-            toast.error("Shields up: PDF synthesis failed.", { id: loadingToast });
+            toast.error("PDF synthesis failed.", { id: loadingToast });
         }
     };
 
