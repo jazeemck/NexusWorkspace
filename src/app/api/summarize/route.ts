@@ -119,8 +119,11 @@ async function analyzeWithGemini(
 
   const prompt = `TITLE: ${videoTitle}\nDURATION: ${durationText}\nCATEGORY: ${category}\n\nDATA_SIGNALS (May include Transcript, Metadata, or Crawl results):\n${content}\n\nNOTE: The data above is labeled with [SIGNAL_TYPE]. Focus primarily on the [TRANSCRIPT] if available, otherwise analyze the [FIRE_CRAWL_DATA] and [SHORT_DESCRIPTION] to synthesize the core content.\n\n${assignment}`;
 
-  console.log(`[Summarizer] Calling Universal AI Engine (Provider Fallback Active)...`);
-  const { text } = await callAI({ parts: [{ text: prompt }] });
+  console.log(`[Summarizer] Calling Universal AI Engine (JSON Mode Active)...`);
+  const { text } = await callAI({ 
+    parts: [{ text: prompt }],
+    responseMimeType: "application/json"
+  });
 
   let sanitized = text.trim();
   

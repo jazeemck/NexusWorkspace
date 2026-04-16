@@ -14,7 +14,7 @@ export interface AIResult extends GeminiResult {
   provider: "gemini" | "groq";
 }
 
-export async function callAI(opts: GeminiCallOptions): Promise<AIResult> {
+export async function callAI(opts: GeminiCallOptions & { responseMimeType?: string }): Promise<AIResult> {
   try {
     // ── Attempt 1: Gemini (Handles key rotation internally) ───────────────
     const geminiRes = await callGemini(opts);
@@ -53,11 +53,12 @@ export async function callAI(opts: GeminiCallOptions): Promise<AIResult> {
           "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: GROQ_MODEL,
-          messages: [{ role: "user", content: textPrompt }],
-          temperature: 0.1, // Keep it precise for cover letters/skills
-        }),
+          body: JSON.stringify({
+            model: GROQ_MODEL,
+            messages: [{ role: "user", content: textPrompt }],
+            temperature: 0.1, 
+            response_format: opts.responseMimeType === "application/json" ? { type: "json_object" } : undefined
+          }),
       });
 
       if (!groqRes.ok) {

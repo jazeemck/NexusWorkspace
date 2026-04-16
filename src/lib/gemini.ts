@@ -37,6 +37,8 @@ export interface GeminiCallOptions {
   parts: GeminiPart[];
   /** Override the default model chain (uses ai-config chain by default). */
   modelChain?: string[];
+  /** Expected response MIME type (e.g. 'application/json') */
+  responseMimeType?: string;
 }
 
 export interface GeminiResult {
@@ -113,7 +115,12 @@ export async function callGemini(opts: GeminiCallOptions): Promise<GeminiResult>
         const res = await fetch(geminiUrl(modelId, apiKey), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contents: [{ parts: opts.parts }] }),
+          body: JSON.stringify({ 
+            contents: [{ parts: opts.parts }],
+            generationConfig: opts.responseMimeType ? {
+              response_mime_type: opts.responseMimeType
+            } : undefined
+          }),
         });
 
         // ── Success ────────────────────────────────────────────────────────
