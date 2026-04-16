@@ -124,30 +124,53 @@ async function analyzeWithGemini(
 
   let sanitized = text.trim();
   
-  // 1. Remove markdown code blocks if present
-  if (sanitized.startsWith("```json")) sanitized = sanitized.replace(/^```json\n|```$/g, "");
-  else if (sanitized.startsWith("```")) sanitized = sanitized.replace(/^```\n|```$/g, "");
+  // 1. Precise JSON boundary detection
+  const firstBrace = sanitized.indexOf('{');
+  const firstBracket = sanitized.indexOf('[');
+  const start = (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) ? firstBrace : firstBracket;
   
-  // 2. Locate the actual JSON object/array
-  const jsonMatch = sanitized.match(/\[\s*\{[\s\S]*\}\s*\]|\{\s*"[\s\S]*":[\s\S]*\}/);
-  if (jsonMatch) sanitized = jsonMatch[0];
+  const lastBrace = sanitized.lastIndexOf('}');
+  const lastBracket = sanitized.lastIndexOf(']');
+  const end = Math.max(lastBrace, lastBracket);
 
-  // 3. Fix common "Bad Control Character" issues (literal newlines/tabs in strings)
-  sanitized = sanitized.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, (match, p1) => {
-    return '"' + p1.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t') + '"';
-  });
+  if (start !== -1 && end !== -1 && end > start) {
+      sanitized = sanitized.substring(start, end + 1);
+  }
 
+  // 2. Fix common "Bad Control Character" and unescaped quote issues
+  // This is a defensive regex that tries to escape literal newlines and unescaped quotes
   try {
-    return JSON.parse(sanitized);
+      // First, try to handle literal newlines in strings
+      sanitized = sanitized.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, (match, p1) => {
+        return '"' + p1.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t') + '"';
+      });
+      return JSON.parse(sanitized);
   } catch (e) {
-    console.error(`[Summarizer] JSON Parse Failed.`, e);
-    // Final emergency fallback: strip all non-printable characters except basics
-    const emergencyClean = sanitized.replace(/[\x00-\x1F\x7F-\x9F]/g, "");
-    try {
-        return JSON.parse(emergencyClean);
-    } catch (innerE) {
-        throw new Error(`Failed to parse AI response as JSON.`);
-    }
+      console.error(`[Summarizer] Standard Parse Failed, attempting Deep Clean...`);
+      // Emergency: Strip markdown, fix common AI quote errors
+      const deepClean = sanitized
+          .replace(/```json|```/g, "")
+          .replace(/[\x00-\x1F\x7F-\x9F]/g, "") // non-printable
+          .trim();
+      
+      try {
+          return JSON.parse(deepClean);
+      } catch (innerE) {
+          console.error(`[Summarizer] Deep Clean also failed. Manual repair attempted.`);
+          // If it's a quote issue, try a more aggressive repair (risky but better than failing)
+          // Look for pattern "key": "value" where value might have unescaped quotes
+          const repaired = deepClean.replace(/("(?:intelligentSummary|timestamp|title|summary|description)":\s*")([\s\S]*?)("\s*[,\}])/g, (m, p1, p2, p3) => {
+              // Escape quotes inside the value that aren't already escaped
+              const escapedValue = p2.replace(/(?<!\\)"/g, '\\"');
+              return p1 + escapedValue + p3;
+          });
+          
+          try {
+              return JSON.parse(repaired);
+          } catch (lastE) {
+              throw new Error(`Intelligence engine returned invalid format. Please try again.`);
+          }
+      }
   }
 }
 
