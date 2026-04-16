@@ -126,52 +126,80 @@ async function analyzeWithGemini(
   
   // 1. Precise JSON boundary detection
   const firstBrace = sanitized.indexOf('{');
-  const firstBracket = sanitized.indexOf('[');
-  const start = (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) ? firstBrace : firstBracket;
-  
   const lastBrace = sanitized.lastIndexOf('}');
-  const lastBracket = sanitized.lastIndexOf(']');
-  const end = Math.max(lastBrace, lastBracket);
 
-  if (start !== -1 && end !== -1 && end > start) {
-      sanitized = sanitized.substring(start, end + 1);
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      sanitized = sanitized.substring(firstBrace, lastBrace + 1);
   }
 
-  // 2. Fix common "Bad Control Character" and unescaped quote issues
-  // This is a defensive regex that tries to escape literal newlines and unescaped quotes
-  try {
-      // First, try to handle literal newlines in strings
-      sanitized = sanitized.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, (match, p1) => {
-        return '"' + p1.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t') + '"';
-      });
-      return JSON.parse(sanitized);
-  } catch (e) {
-      console.error(`[Summarizer] Standard Parse Failed, attempting Deep Clean...`);
-      // Emergency: Strip markdown, fix common AI quote errors
-      const deepClean = sanitized
-          .replace(/```json|```/g, "")
-          .replace(/[\x00-\x1F\x7F-\x9F]/g, "") // non-printable
-          .trim();
-      
+  // 2. Comprehensive Cleaning Pipeline
+  const clean = (str: string) => {
+    return str
+      .replace(/```json|```/g, "")
+      .replace(/[\u0000-\u001F\u007F-\u009F]/g, "") // remove control characters
+      .trim();
+  };
+
+  const tryParse = (str: string) => {
+    try {
+      // Direct parse
+      return JSON.parse(str);
+    } catch (e) {
+      // Try to handle literal newlines that AIs often forget to escape
       try {
-          return JSON.parse(deepClean);
-      } catch (innerE) {
-          console.error(`[Summarizer] Deep Clean also failed. Manual repair attempted.`);
-          // If it's a quote issue, try a more aggressive repair (risky but better than failing)
-          // Look for pattern "key": "value" where value might have unescaped quotes
-          const repaired = deepClean.replace(/("(?:intelligentSummary|timestamp|title|summary|description)":\s*")([\s\S]*?)("\s*[,\}])/g, (m, p1, p2, p3) => {
-              // Escape quotes inside the value that aren't already escaped
-              const escapedValue = p2.replace(/(?<!\\)"/g, '\\"');
-              return p1 + escapedValue + p3;
-          });
-          
-          try {
-              return JSON.parse(repaired);
-          } catch (lastE) {
-              throw new Error(`Intelligence engine returned invalid format. Please try again.`);
-          }
+        const escapedNewlines = str.replace(/\n/g, "\\n").replace(/\r/g, "\\r");
+        return JSON.parse(escapedNewlines);
+      } catch (e2) {
+        return null;
       }
+    }
+  };
+
+  let result = tryParse(clean(sanitized));
+
+  if (!result) {
+    console.warn(`[Summarizer] Initial parse failed, attempting deep structural repair...`);
+    
+    // Deep structural repair: Escape unescaped quotes inside string values
+    // This looks for "key": "value" patterns and escapes middle quotes
+    let repaired = clean(sanitized);
+    
+    // Fix common issues: 
+    // - Unescaped quotes inside values
+    // - Multiple lines in values
+    repaired = repaired.replace(/(": ")([\s\S]*?)(",\n|"\s*[,}\]])/g, (match, p1, p2, p3) => {
+      // Escape internal quotes that aren't already escaped
+      const escaped = p2.replace(/(?<!\\)"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+      return p1 + escaped + p3;
+    });
+
+    result = tryParse(repaired);
   }
+
+  if (result) {
+    let normalizedResult = result;
+    // Normalize top-level keys
+    if (!result.intelligentSummary && (result.summary || result.content)) {
+        normalizedResult = {
+            intelligentSummary: result.summary || result.content,
+            timelineSummary: result.timeline || result.segments || result.timelineSummary || []
+        };
+    }
+
+    // Basic validation of expected keys
+    if (normalizedResult.intelligentSummary && Array.isArray(normalizedResult.timelineSummary)) {
+        // Normalize array items
+        normalizedResult.timelineSummary = normalizedResult.timelineSummary.map((item: any) => ({
+            timestamp: item.timestamp || item.time || item.at || "00:00",
+            title: item.title || item.heading || "Segment",
+            description: item.description || item.summary || item.details || ""
+        }));
+        return normalizedResult;
+    }
+  }
+
+  console.error(`[Summarizer] All JSON repair attempts failed for response: ${text.substring(0, 200)}...`);
+  throw new Error(`Intelligence engine returned invalid format. Please try again.`);
 }
 
 export async function POST(req: NextRequest) {
