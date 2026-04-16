@@ -6,6 +6,7 @@ import { authOptions } from "@/lib/auth";
 import { getServerSession } from "next-auth/next";
 import { GEMINI_BUSY_MESSAGE, GEMINI_QUOTA_MESSAGE } from "@/lib/gemini";
 import { callAI } from "@/lib/ai-universal";
+import { getYouTubeMetadata } from "@/lib/youtube";
 
 interface FirecrawlResponse {
   success: boolean;
@@ -92,16 +93,19 @@ async function analyzeWithGemini(
   videoTitle: string,
   targetLanguage: string,
   category: string,
-  durationSeconds: number | null
+  durationSeconds: number | null,
+  isMetaDataOnly: boolean = false
 ): Promise<GeminiResult> {
   const durationText = durationSeconds ? formatDuration(durationSeconds) : "Unknown";
 
   const assignment = `
-  Generate a high-density intelligence report in ${targetLanguage}.
+  Generate a PRESTIGE-GRADE high-density intelligence report in ${targetLanguage}.
   
   MANDATORY REQUIREMENTS:
-  1. "intelligentSummary": A 3-5 paragraph deep-dive into the core thesis.
-  2. "timelineSummary": A chronological mapping of EXACTLY 10 segments with specific timestamps (e.g. "00:00", "05:12").
+  1. "intelligentSummary": A 3-5 paragraph architectural deep-dive (minimum 400 words). If you only have metadata (Title/Description), extrapolate the core value proposition and key themes using your internal knowledge of the subject matter.
+  2. "timelineSummary": A chronological mapping of ${isMetaDataOnly ? "exactly 5" : "exactly 10"} segments.
+     - IF METADATA ONLY: Distribute the 5 segments across the total duration (${durationText}). For example, if duration is 10:00, space them as 00:00, 02:30, 05:00, 07:30, 09:00. 
+     - DO NOT use "00:00" for all segments. ESTIMATE the pacing based on common video structures.
 
   SCHEMA:
   {
@@ -113,18 +117,38 @@ async function analyzeWithGemini(
 
   Return ONLY raw JSON with zero markdown formatting.`;
 
-  const prompt = `TITLE: ${videoTitle}\nDURATION: ${durationText}\nCATEGORY: ${category}\n\nTRANSCRIPT:\n${content}\n\n${assignment}`;
+  const prompt = `TITLE: ${videoTitle}\nDURATION: ${durationText}\nCATEGORY: ${category}\n\nDATA_SIGNALS (May include Transcript, Metadata, or Crawl results):\n${content}\n\nNOTE: The data above is labeled with [SIGNAL_TYPE]. Focus primarily on the [TRANSCRIPT] if available, otherwise analyze the [FIRE_CRAWL_DATA] and [SHORT_DESCRIPTION] to synthesize the core content.\n\n${assignment}`;
 
   console.log(`[Summarizer] Calling Universal AI Engine (Provider Fallback Active)...`);
   const { text } = await callAI({ parts: [{ text: prompt }] });
 
   let sanitized = text.trim();
-  const jsonMatch = sanitized.match(/\[\s*\{[\s\S]*\}\s*\]|\{\s*"[\s\S]*":[\s\S]*\}/);
-  if (jsonMatch) sanitized = jsonMatch[0];
+  
+  // 1. Remove markdown code blocks if present
   if (sanitized.startsWith("```json")) sanitized = sanitized.replace(/^```json\n|```$/g, "");
   else if (sanitized.startsWith("```")) sanitized = sanitized.replace(/^```\n|```$/g, "");
+  
+  // 2. Locate the actual JSON object/array
+  const jsonMatch = sanitized.match(/\[\s*\{[\s\S]*\}\s*\]|\{\s*"[\s\S]*":[\s\S]*\}/);
+  if (jsonMatch) sanitized = jsonMatch[0];
 
-  return JSON.parse(sanitized);
+  // 3. Fix common "Bad Control Character" issues (literal newlines/tabs in strings)
+  sanitized = sanitized.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, (match, p1) => {
+    return '"' + p1.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t') + '"';
+  });
+
+  try {
+    return JSON.parse(sanitized);
+  } catch (e) {
+    console.error(`[Summarizer] JSON Parse Failed.`, e);
+    // Final emergency fallback: strip all non-printable characters except basics
+    const emergencyClean = sanitized.replace(/[\x00-\x1F\x7F-\x9F]/g, "");
+    try {
+        return JSON.parse(emergencyClean);
+    } catch (innerE) {
+        throw new Error(`Failed to parse AI response as JSON.`);
+    }
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -156,15 +180,16 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Invalid YouTube URL format. Could not extract Video ID." }, { status: 400 });
     }
 
-    let transcriptText = "";
+    let contentSignals: string[] = [];
     let videoTitle = "YouTube Video";
     let videoDescription = "";
+    let transcriptText = "";
     let extractionMethod = "transcript";
 
     // ── Step 1: Parallel Extraction Strategy ─────────────────────────────────────
     console.log(`[Extraction] Launching Multi-Layer Intelligence Fetch for: ${videoId}`);
     
-    const [transcriptResult, firecrawlResult] = await Promise.allSettled([
+    const [transcriptResult, firecrawlResult, oembedResult] = await Promise.allSettled([
       (async () => {
         let text = "";
         try {
@@ -177,13 +202,17 @@ export async function POST(req: NextRequest) {
         } catch (e) {}
         return text;
       })(),
-      scrapeWithFirecrawl(url)
+      scrapeWithFirecrawl(url),
+      getYouTubeMetadata(url)
     ]);
 
     // Handle Transcript Layer
     if (transcriptResult.status === "fulfilled" && transcriptResult.value) {
-      transcriptText = transcriptResult.value;
-      console.log(`[Extraction] Transcript Layer: SUCCESS (${transcriptText.length} chars)`);
+      const text = transcriptResult.value;
+      if (text.length > 50) {
+        contentSignals.push(`[TRANSCRIPT]:\n${text}`);
+        console.log(`[Extraction] Transcript Layer: SUCCESS (${text.length} chars)`);
+      }
     }
 
     // Handle Metadata/Firecrawl Layer
@@ -197,13 +226,17 @@ export async function POST(req: NextRequest) {
         const titleMatch = res.markdown.match(/^#\s+(.+)/m);
         if (titleMatch) videoTitle = titleMatch[1].trim();
         
-        // Use as primary if transcript is sparse
-        if (!transcriptText || transcriptText.length < 200) {
-          transcriptText = (transcriptText ? transcriptText + "\n\n" : "") + videoDescription;
-          extractionMethod = transcriptText ? "metadata_analysis" : "transcript";
-          console.log(`[Extraction] High-Performance Meta Layer: SUCCESS (${videoDescription.length} chars)`);
-        }
+        contentSignals.push(`[FIRE_CRAWL_DATA]:\n${res.markdown}`);
+        console.log(`[Extraction] Firecrawl Layer: SUCCESS (${res.markdown.length} chars)`);
       }
+    }
+
+    // Handle oEmbed Layer (Most reliable for title/availability)
+    if (oembedResult.status === "fulfilled" && oembedResult.value && !('error' in oembedResult.value)) {
+      if (videoTitle === "YouTube Video" || !videoTitle) {
+        videoTitle = oembedResult.value.title || videoTitle;
+      }
+      console.log(`[Extraction] oEmbed Layer: SUCCESS (Title: ${videoTitle})`);
     }
 
     // ── Step 2: Stealth Manual Scrape (Final Bypass Fallback) ──────────────
@@ -213,9 +246,22 @@ export async function POST(req: NextRequest) {
         const metaRes = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' }, cache: 'no-store' });
         const html = await metaRes.text();
         
-        // Unavailable Detection
-        if (html.includes("Video unavailable") || html.includes("This video isn't available anymore") || html.includes("Private video")) {
-          return NextResponse.json({ error: "Video is private, restricted, or deleted." }, { status: 404 });
+        // Unavailable Detection (More nuanced)
+        const isUnavailable = html.includes("Video unavailable") || html.includes("This video isn't available anymore") || html.includes("Private video");
+        
+        // If oEmbed gave us a title, it's likely NOT private/deleted, just throttled scrape
+        const hasOembedTitle = oembedResult.status === "fulfilled" && oembedResult.value && oembedResult.value.title && !oembedResult.value.error;
+
+        if (isUnavailable && !hasOembedTitle) {
+          console.warn(`[Extraction] Video reported as unavailable and oEmbed failed. videoId: ${videoId}`);
+          return NextResponse.json({ 
+            error: "This video appears to be private, restricted, or deleted.",
+            code: "VIDEO_UNAVAILABLE"
+          }, { status: 404 });
+        }
+
+        if (isUnavailable && hasOembedTitle) {
+            console.log(`[Extraction] Scrape blocked (Video unavailable page detected) but oEmbed verified title. Continuing with meta analysis...`);
         }
 
         // Title and Description Extract
@@ -228,10 +274,22 @@ export async function POST(req: NextRequest) {
         if (dm) {
             let desc = dm[1].replace(/\\n/g, "\n").replace(/\\"/g, '"');
             if (desc.length > 50) {
-                transcriptText = (transcriptText && transcriptText.length > 50 ? transcriptText + "\n\n[Additional Metadata]:\n" : "[Metadata Description]:\n") + desc;
-                extractionMethod = extractionMethod === "transcript" ? "context_synthesis" : "stealth_manual_analysis";
+                contentSignals.push(`[SHORT_DESCRIPTION]:\n${desc}`);
                 console.log(`[Extraction] Stealth Manual Layer: SUCCESS (${desc.length} chars)`);
             }
+        }
+
+        // Meta Tag Fallbacks (og:title, og:description)
+        if (videoTitle === "YouTube Video" || !videoTitle) {
+            const ogTitle = html.match(/<meta property="og:title" content="([^"]+)">/i);
+            if (ogTitle) videoTitle = ogTitle[1].trim();
+        }
+        
+        const ogDesc = html.match(/<meta property="og:description" content="([^"]+)">/i);
+        if (ogDesc) {
+            const desc = ogDesc[1].replace(/\\n/g, "\n").replace(/\\"/g, '"');
+            contentSignals.push(`[OG_DESCRIPTION]:\n${desc}`);
+            console.log(`[Extraction] Meta Tag Layer: SUCCESS`);
         }
 
         // Chapters Extract
@@ -242,28 +300,38 @@ export async function POST(req: NextRequest) {
                 const tm = c.match(/"timeDescriptionUTF8":"(.+?)"/);
                 return t && tm ? `${tm[1]} - ${t[1]}` : null;
             }).filter(Boolean).join("\n");
-            if (parsed) transcriptText = (transcriptText ? transcriptText + "\n\n[PROCESSED CHAPTERS]:\n" : "[PROCESSED CHAPTERS]:\n") + parsed;
+            if (parsed) contentSignals.push(`[PROCESSED_CHAPTERS]:\n${parsed}`);
         }
       } catch (e) {
         console.error("[Extraction] Stealth Manual Layer: FAILED", e);
       }
     }
 
+    transcriptText = contentSignals.join("\n\n---\n\n");
+    extractionMethod = contentSignals.length > 0 ? "multi_signal_synthesis" : "unknown";
+
     if (!transcriptText || transcriptText.trim().length < 20) {
-      console.warn("[Summarize] CRITICAL EXTRACTION FAILURE: All layers failed.");
-      return NextResponse.json(
-        { 
-          error: "Our extraction engine was temporarily throttled by YouTube. Please try another video or retry in 30 seconds as we rotate our access fingerprints.",
-          code: "EXTRACTION_BLOCKED",
-          diagnostics: {
-             hasTranscript: !!transcriptText,
-             hasFirecrawl: !!videoDescription,
-             videoId,
-             method: extractionMethod
-          }
-        },
-        { status: 429 }
-      );
+      // If we have at least a title, we can try to "analyze" based on title/metadata
+      if (videoTitle && videoTitle !== "YouTube Video") {
+        transcriptText = `No full transcript available for this video.\nTitle: ${videoTitle}\n${videoDescription ? "Description: " + videoDescription : ""}\n\nPlease provide a brief overview based on this metadata only.`;
+        extractionMethod = "metadata_fallback";
+        console.log("[Extraction] Falling back to Metadata-only analysis.");
+      } else {
+        console.warn("[Summarize] CRITICAL EXTRACTION FAILURE: All layers failed.");
+        return NextResponse.json(
+          { 
+            error: "This video is restricted or YouTube has blocked our extraction engine. We couldn't even retrieve basic metadata.",
+            code: "EXTRACTION_BLOCKED",
+            diagnostics: {
+               hasTranscript: !!transcriptText,
+               hasFirecrawl: !!videoDescription,
+               videoId,
+               method: extractionMethod
+            }
+          },
+          { status: 429 }
+        );
+      }
     }
 
     // ── Step 3: Fetch Duration ───────────────────────────────────────────
@@ -273,7 +341,14 @@ export async function POST(req: NextRequest) {
     let geminiResult: GeminiResult;
     try {
       console.log(`[Summarize] Starting ${extractionMethod} for videoId: ${videoId}`);
-      geminiResult = await analyzeWithGemini(transcriptText, videoTitle, targetLanguage, category, durationSeconds);
+      geminiResult = await analyzeWithGemini(
+        transcriptText, 
+        videoTitle, 
+        targetLanguage, 
+        category, 
+        durationSeconds,
+        extractionMethod === "metadata_fallback" || !contentSignals.some(s => s.startsWith("[TRANSCRIPT]"))
+      );
     } catch (aiErr: any) {
       console.error("[Summarize] Gemini Analysis Critical Failure:", aiErr);
 
