@@ -11,7 +11,7 @@ interface Source {
   trend: 'up' | 'down' | 'steady';
 }
 
-const sources: Source[] = [
+const defaultSources: Source[] = [
   { name: 'Fireship', insights: 42, depth: 8.9, trend: 'up' },
   { name: 'Veritasium', insights: 38, depth: 9.2, trend: 'steady' },
   { name: 'Theo - t3.gg', insights: 31, depth: 7.4, trend: 'up' },
@@ -19,7 +19,7 @@ const sources: Source[] = [
   { name: '3Blue1Brown', insights: 24, depth: 9.8, trend: 'up' },
 ];
 
-export default function TopKnowledgeSources() {
+export default function TopKnowledgeSources({ sources = defaultSources }: { sources?: Source[] }) {
   const [sortKey, setSortKey] = useState<'volume' | 'depth'>('volume');
 
   const sortedSources = [...sources].sort((a, b) => 

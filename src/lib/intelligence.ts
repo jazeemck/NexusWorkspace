@@ -15,6 +15,17 @@ export interface IntelligenceReport {
   primaryTone: string;
   toneDescription: string;
   confidence: number;
+  blindSpot: {
+    topic: string;
+    missingTopic: string;
+    description: string;
+  };
+  knowledgeSources: {
+    name: string;
+    insights: number;
+    depth: number;
+    trend: "up" | "down" | "steady";
+  }[];
 }
 
 export async function generateIntelligenceReport(userId: string): Promise<IntelligenceReport | null> {
@@ -34,13 +45,13 @@ export async function generateIntelligenceReport(userId: string): Promise<Intell
   }
 
   // Construct signals for AI
-  const noteSignals = notes.map(n => `Note: ${n.title}\nContent: ${n.body?.slice(0, 300)}`).join('\n\n');
-  const summarySignals = summaries.map(s => `Video: ${s.video_title}\nSummary: ${s.tldr?.slice(0, 300)}`).join('\n\n');
+  const noteSignals = notes.map(n => `Note [${n.tags?.join(", ")}]: ${n.title}`).join('\n');
+  const summarySignals = summaries.map(s => `Summarized Video: ${s.video_title}`).join('\n');
 
   const prompt = `
-    Analyze the following research signals from a user's library and generate a DEEP INTELLIGENCE report.
+    Analyze user's research signals and generate a DEEP INTELLIGENCE report.
     
-    RESEARCH SIGNALS:
+    RESEARCH SIGNALS (Notes & Videos):
     ${noteSignals}
     
     ${summarySignals}
@@ -58,12 +69,20 @@ export async function generateIntelligenceReport(userId: string): Promise<Intell
         { "label": "Neutral", "percentage": number },
         { "label": "Critical", "percentage": number }
       ],
-      "primaryTone": "string (Single word like 'Optimistic')",
-      "toneDescription": "string (Short description of why this tone was detected)",
-      "confidence": number (Percentage 0-100)
+      "primaryTone": "string",
+      "toneDescription": "string",
+      "confidence": number,
+      "blindSpot": {
+        "topic": "string (A topic they are strong in)",
+        "missingTopic": "string (A related logical next-step topic they are missing)",
+        "description": "string (Why this gap matters)"
+      },
+      "knowledgeSources": [
+        { "name": "string", "insights": number, "depth": number (0-10), "trend": "up"|"down"|"steady" }
+      ] (List top 5 sources/channels they seem to be learning from)
     }
 
-    Return ONLY the raw JSON.
+    Return ONLY raw JSON.
   `;
 
   try {

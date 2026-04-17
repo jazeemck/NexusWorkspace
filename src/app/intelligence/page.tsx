@@ -131,11 +131,15 @@ export default async function IntelligencePage() {
           </div>
 
           {/* 7. Blind Spot Alert */}
-          <BlindSpotAlert />
+          <BlindSpotAlert 
+            topic={report.blindSpot.topic}
+            missingTopic={report.blindSpot.missingTopic}
+            description={report.blindSpot.description}
+          />
 
           {/* 8. Top Knowledge Sources + Full Index Report */}
           <div className="grid md:grid-cols-2 gap-8 mb-32 animate-fade-in delay-300">
-            <TopKnowledgeSources />
+            <TopKnowledgeSources sources={report.knowledgeSources} />
             <FullIndexReportCard />
           </div>
         </main>
