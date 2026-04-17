@@ -13,25 +13,56 @@ import TopKnowledgeSources from "@/components/deep-intelligence/TopKnowledgeSour
 import FullIndexReportCard from "@/components/deep-intelligence/FullIndexReportCard";
 import MetricTooltip from "@/components/deep-intelligence/MetricTooltip";
 
+import { generateIntelligenceReport } from "@/lib/intelligence";
+
 export const metadata = { title: "Deep Intelligence — Nexus" };
 
 export default async function IntelligencePage() {
   const session = await getServerSession(authOptions);
-  const user = session?.user ? {
+  
+  if (!session?.user) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-8">
+        <div className="text-center">
+          <h2 className="text-4xl font-black uppercase tracking-widest mb-4">Secure Access Required</h2>
+          <p className="text-muted-foreground font-medium">Please sign in to view your Deep Intelligence briefing.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const user = {
     id: session.user.id,
     email: session.user.email || "",
     name: session.user.name || undefined,
     image: session.user.image || undefined
-  } : undefined;
-
-  // Mock data for the page
-  const healthScore = {
-    score: 78,
-    summary: "You are building focused expertise with a slight bias towards optimistic sources.",
-    metrics: ["Focus Retention", "Sentiment Balance", "Learning Velocity", "Source Diversity"]
   };
 
-  const synthesis = "This week you researched consistently, your focus is narrowing positively, but your sources skew heavily optimistic — consider adding critical perspectives.";
+  // Generate dynamic intelligence report
+  const report = await generateIntelligenceReport(user.id);
+
+  if (!report) {
+    return (
+      <div className="min-h-screen bg-background text-foreground">
+        <Navbar user={user} />
+        <main className="max-w-6xl mx-auto px-6 pt-48 pb-20 text-center">
+             <div className="inline-flex items-center gap-3 py-2 px-5 bg-foreground/[0.03] border border-border rounded-full mb-12">
+                <Brain className="w-4 h-4 text-foreground/40" />
+                <span className="text-[10px] font-black uppercase tracking-[0.4em] text-foreground/60">Data Signal Weak</span>
+             </div>
+             <h1 className="text-7xl font-black tracking-tighter mb-8 italic uppercase">Insufficient <br/> Intelligence.</h1>
+             <p className="text-muted-foreground max-w-xl mx-auto font-medium leading-relaxed mb-12 italic">
+               Nexus requires more data to synthesize a deep intelligence briefing. 
+               Summarize a few videos or secure some notes to initialize your cognitive signals.
+             </p>
+             <div className="flex justify-center gap-4">
+               <a href="/summarizer" className="bg-foreground text-background px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px]">Summarize Media</a>
+               <a href="/notes" className="border border-border px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-muted transition-all">Secure Notes</a>
+             </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground transition-all duration-700">
@@ -54,19 +85,19 @@ export default async function IntelligencePage() {
             </h1>
           </div>
 
-          {/* 3. Research Health Score (NEW) */}
+          {/* 3. Research Health Score */}
           <ResearchHealthScore 
-            score={healthScore.score} 
-            summary={healthScore.summary} 
-            metrics={healthScore.metrics} 
+            score={report.healthScore.score} 
+            summary={report.healthScore.summary} 
+            metrics={report.healthScore.metrics} 
           />
         </main>
 
-        {/* 4. Nexus Synthesis Strip (NEW) */}
-        <NexusSynthesis insight={synthesis} />
+        {/* 4. Nexus Synthesis Strip */}
+        <NexusSynthesis insight={report.synthesis} />
 
         <main className="max-w-6xl mx-auto px-6">
-          {/* 5. Existing Three Feature Cards Row */}
+          {/* 5. Feature Cards Row */}
           <div className="grid md:grid-cols-3 gap-8 mb-24">
             {[
               { icon: BarChart, title: "Content Trends", desc: "Identify recurring themes and topics across all your summarized videos.", tooltip: "Clusters metadata and transcript signals to discover patterns across multiple content streams." },
@@ -91,10 +122,15 @@ export default async function IntelligencePage() {
             <div className="lg:col-span-2">
               <LearningProgressGraph />
             </div>
-            <ToneAnalysisCard />
+            <ToneAnalysisCard 
+              splits={report.toneSplit}
+              primaryTone={report.primaryTone}
+              description={report.toneDescription}
+              confidence={report.confidence}
+            />
           </div>
 
-          {/* 7. Blind Spot Alert (NEW) */}
+          {/* 7. Blind Spot Alert */}
           <BlindSpotAlert />
 
           {/* 8. Top Knowledge Sources + Full Index Report */}
