@@ -80,7 +80,7 @@ export default function NotesClient({ initialUser }: { initialUser: any }) {
         let fullText = '';
         for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent({ normalizeWhitespace: true });
+            const textContent = await page.getTextContent({ normalizeWhitespace: true } as any);
             
             // @ts-ignore
             const items = textContent.items as any[];
