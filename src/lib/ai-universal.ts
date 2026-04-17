@@ -25,7 +25,8 @@ export async function callAI(opts: GeminiCallOptions & { responseMimeType?: stri
     const isQuotaError = 
       err.message === GEMINI_QUOTA_MESSAGE || 
       err.message?.includes("429") || 
-      err.message?.toLowerCase().includes("quota");
+      err.message?.toLowerCase().includes("quota") ||
+      err.message?.toLowerCase().includes("exhausted");
 
     if (!isQuotaError || !process.env.GROQ_API_KEY) {
       throw err; // Re-throw if it's not a quota issue or we don't have Groq

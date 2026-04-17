@@ -91,7 +91,9 @@ export async function generateIntelligenceReport(userId: string): Promise<Intell
       responseMimeType: "application/json"
     });
 
-    const report = JSON.parse(text);
+    // Helper to clean potential markdown wrappers
+    const jsonStr = text.replace(/```json/g, "").replace(/```/g, "").trim();
+    const report = JSON.parse(jsonStr);
     return report;
   } catch (error) {
     console.error("Failed to generate intelligence report:", error);

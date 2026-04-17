@@ -414,11 +414,12 @@ export default function NotesClient({ initialUser }: { initialUser: any }) {
         // Search
         if (searchQuery) {
             const q = searchQuery.toLowerCase();
-            result = result.filter(n => 
-                n.title.toLowerCase().includes(q) || 
-                n.body.toLowerCase().includes(q) || 
-                n.tags.some(t => t.toLowerCase().includes(q))
-            );
+            result = result.filter(n => {
+                const titleMatch = (n.title || "").toLowerCase().includes(q);
+                const bodyMatch = (n.body || "").toLowerCase().includes(q);
+                const tagMatch = (n.tags || []).some(t => (t || "").toLowerCase().includes(q));
+                return titleMatch || bodyMatch || tagMatch;
+            });
         }
 
         // Sidebar/Tab Filter

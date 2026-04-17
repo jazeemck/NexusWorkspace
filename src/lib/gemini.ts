@@ -171,6 +171,6 @@ export async function callGemini(opts: GeminiCallOptions): Promise<GeminiResult>
   }
 
   // Every key and model combination failed.
-  console.error("[Gemini] All API keys and models exhausted.");
+  console.warn("[Gemini] All API keys and models exhausted.");
   throw new Error(GEMINI_QUOTA_MESSAGE);
 }

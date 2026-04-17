@@ -21,12 +21,14 @@ export const GEMINI_MODEL = "gemini-2.0-flash";
 /** Groq endpoint configuration */
 export const GROQ_MODEL = "llama-3.3-70b-versatile";
 
-/**
+/** 
  * Ordered list of models to try.
  * If the primary returns 429/503, the next one is attempted immediately.
- * All models here must be verified available on the v1beta endpoint.
  */
-export const GEMINI_MODEL_CHAIN: string[] = [GEMINI_MODEL];
+export const GEMINI_MODEL_CHAIN: string[] = [
+  GEMINI_MODEL,
+  "gemini-1.5-flash"
+];
 
 /** Gemini REST API version in use. */
 export const GEMINI_API_VERSION = "v1beta";
