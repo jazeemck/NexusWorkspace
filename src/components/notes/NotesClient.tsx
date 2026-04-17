@@ -72,7 +72,7 @@ export default function NotesClient({ initialUser }: { initialUser: any }) {
     const loadPDF = async (file: File): Promise<string> => {
         const pdfjsLib = await import('pdfjs-dist');
         // @ts-ignore
-        pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
         
         const arrayBuffer = await file.arrayBuffer();
         const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
@@ -80,12 +80,39 @@ export default function NotesClient({ initialUser }: { initialUser: any }) {
         let fullText = '';
         for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
+            const textContent = await page.getTextContent({ normalizeWhitespace: true });
+            
             // @ts-ignore
-            const pageText = textContent.items.map((item: any) => item.str).join(' ');
-            fullText += pageText + '\n\n';
+            const items = textContent.items as any[];
+            let lastY: number | null = null;
+            let pageText = '';
+            
+            for (const item of items) {
+                if (!item.str && item.str !== '') continue;
+
+                const currentY = item.transform[5];
+                
+                // Detect line change (Y coordinate shift)
+                if (lastY !== null && Math.abs(currentY - lastY) > 3) {
+                    pageText += '\n';
+                } 
+                // Add space between items on the same line if not already spaced
+                else if (lastY !== null && item.str.trim() !== '' && !pageText.endsWith('\n') && !pageText.endsWith(' ')) {
+                    pageText += ' ';
+                }
+
+                pageText += item.str;
+
+                if (item.hasEOL) {
+                    pageText += '\n';
+                    lastY = null;
+                } else {
+                    lastY = currentY;
+                }
+            }
+            fullText += pageText.trim() + '\n\n';
         }
-        return fullText;
+        return fullText.trim();
     };
 
     const handleDocumentUpload = async (file: File) => {
