@@ -141,7 +141,7 @@ export async function callGemini(opts: GeminiCallOptions): Promise<GeminiResult>
 
         // ── Rate-limited / temporarily unavailable ─────────────────────────
         const status = res.status;
-        await res.text().catch(() => ""); // drain body
+        const errBody = await res.text().catch(() => ""); // consume body once
 
         if (RETRYABLE_STATUSES.has(status)) {
           console.warn(`[Gemini] ${keyLabel}/${modelId} → ${status}.`);
@@ -150,8 +150,7 @@ export async function callGemini(opts: GeminiCallOptions): Promise<GeminiResult>
         }
 
         // ── Non-retryable (400, 401, 404, …) ──────────────────────────────
-        const errBody = await res.clone().text().catch(() => "");
-        console.error(`[Gemini] ${keyLabel}/${modelId} non-retryable ${status}: ${errBody.substring(0, 200)}`);
+        console.warn(`[Gemini] ${keyLabel}/${modelId} non-retryable ${status}: ${errBody.substring(0, 200)}`);
         throw new Error(`Gemini API error ${status}: ${errBody.substring(0, 200)}`);
 
       } catch (err: any) {
@@ -161,7 +160,7 @@ export async function callGemini(opts: GeminiCallOptions): Promise<GeminiResult>
         ) {
           throw err; // re-throw typed errors
         }
-        console.error(`[Gemini] ${keyLabel}/${modelId} network error:`, err?.message);
+        console.warn(`[Gemini] ${keyLabel}/${modelId} network error:`, err?.message);
         continue;
       }
     }
