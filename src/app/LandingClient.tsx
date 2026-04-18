@@ -191,10 +191,15 @@ export default function LandingClient({ session }: { session: Session | null }) 
              <div className="w-8 h-8 rounded-lg bg-foreground flex items-center justify-center text-background font-black text-lg shadow-lg">Y</div>
              <p className="text-sm font-medium text-muted-foreground">© 2026 Nexus Workspace</p>
           </div>
-          <div className="flex gap-10">
-            {['Terms', 'Privacy', 'Security', 'Contact'].map(item => (
-               <Link key={item} href="#" className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground transition-all">
-                 {item}
+          <div className="flex gap-8 md:gap-10">
+            {[
+              { name: 'Terms', href: '/terms' },
+              { name: 'Privacy', href: '/privacy' },
+              { name: 'Security', href: '/security' },
+              { name: 'Contact', href: '/contact' }
+            ].map(item => (
+               <Link key={item.name} href={item.href} className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground transition-all flex items-center h-full py-2">
+                 {item.name}
                </Link>
             ))}
           </div>
